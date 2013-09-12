@@ -27,7 +27,7 @@ public class AvcEncoder {
     private MediaCodec.BufferInfo mBufferInfo;
     boolean eosReceived = false;
     boolean eosSentToEncoder = false;
-    long startWhen = 0;
+    long startTime = 0;
 
     public AvcEncoder(Context c) {
         File f = FileUtils.createTempFileInRootAppStorage(c, "test.mp4");
@@ -38,7 +38,11 @@ public class AvcEncoder {
         mediaFormat.setInteger(MediaFormat.KEY_BIT_RATE, 125000);
         mediaFormat.setInteger(MediaFormat.KEY_FRAME_RATE, 30);
         mediaFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+        // COLOR_TI_FormatYUV420PackedSemiPlanar works - wrong hue
+        // COLOR_FormatYUV420PackedSemiPlanar - crash
         mediaFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 5);
+
+        //MediaCodecInfo.CodecCapabilities cc = new MediaCodecInfo.CodecCapabilities();
 
         mEncoder = MediaCodec.createEncoderByType("video/avc");
         mEncoder.configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
@@ -74,8 +78,8 @@ public class AvcEncoder {
 
     // called from Camera.setPreviewCallbackWithBuffer(...) in other class
     public void offerEncoder(byte[] input) {
-        if(startWhen == 0)
-            startWhen = System.nanoTime();
+        if(startTime == 0)
+            startTime = System.nanoTime();
         if(eosSentToEncoder)
             return;
         // transfer previously encoded data to muxer
@@ -88,12 +92,14 @@ public class AvcEncoder {
                 ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
                 inputBuffer.clear();
                 inputBuffer.put(input);
+                long presentationTimeUs = (System.nanoTime() - startTime) / 1000;
+                Log.i(TAG, "Attempt to set PTS: " + presentationTimeUs);
                 if(eosReceived){
-                    mEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                    mEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, presentationTimeUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
                     close();
                     eosSentToEncoder = true;
                 }else
-                    mEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, 0, 0);
+                    mEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, presentationTimeUs, 0);
             }
         } catch (Throwable t) {
             t.printStackTrace();

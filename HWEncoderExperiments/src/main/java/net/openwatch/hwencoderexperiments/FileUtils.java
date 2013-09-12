@@ -84,6 +84,8 @@ public class FileUtils {
         File output = null;
         try {
             if(filename != null){
+                if(!extension.contains("."))
+                    extension = "." + extension;
                 output = File.createTempFile(filename, extension, root);
             }
             return output;
