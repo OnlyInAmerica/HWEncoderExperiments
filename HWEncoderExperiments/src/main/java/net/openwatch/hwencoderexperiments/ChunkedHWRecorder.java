@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+// Enormous thanks to Andrew McFadden for his MediaCodec examples!
 // Adapted from http://bigflake.com/mediacodec/CameraToMpegTest.java.txt
 
 package net.openwatch.hwencoderexperiments;
@@ -54,7 +55,7 @@ public class ChunkedHWRecorder {
     private static final String TAG = "CameraToMpegTest";
     private static final boolean VERBOSE = true;           // lots of logging
     // where to put the output file (note: /sdcard requires WRITE_EXTERNAL_STORAGE permission)
-    private static String OUTPUT_DIR = "/sdcard/";
+    private static String OUTPUT_DIR = "/sdcard/chunktest/";
     // parameters for the encoder
     private static final String MIME_TYPE = "video/avc";    // H.264 Advanced Video Coding
     private static final int FRAME_RATE = 30;               // 30fps
@@ -85,9 +86,9 @@ public class ChunkedHWRecorder {
     // allocate one of these up front so we don't need to do it every time
     private MediaCodec.BufferInfo mBufferInfo;
 
-    // user state
+    // recording state
     private boolean recording = false;
-
+    private int currentChunk = 0;
 
     public void onRunTestButtonClicked(View v){
         try {
@@ -98,7 +99,8 @@ public class ChunkedHWRecorder {
     }
 
     public void startRecording(String outputDir){
-        OUTPUT_DIR = outputDir;
+        if(outputDir != null)
+            OUTPUT_DIR = outputDir;
 
         int encWidth = 640;
         int encHeight = 480;
@@ -119,14 +121,29 @@ public class ChunkedHWRecorder {
             recording = true;
             while (recording) {
                 // Feed any pending encoder output into the muxer.
-                drainEncoder(false);
-
                 // Chunk encoding
                 if ((frameCount % framesPerChunk) == 0 && frameCount != 0){
+                    Log.i(TAG, "Chunking Recording");
                     // finalize mCurrentEncoder
                     // swap mCurrentEncoder
                     // initialize mCurrentEncoder
-                }
+                    drainEncoder(true);
+                    Log.i(TAG, "Chunking Recording - Drained Encoder EOS");
+                    prepareEncoder(encWidth, encHeight, encBitRate);
+                    Log.i(TAG, "Chunking Recording - Prepare new Encoder");
+                    mInputSurface.makeCurrent();
+                    Log.i(TAG, "Chunking Recording - Make inputSurface current");
+                    mCamera.stopPreview();
+                    prepareSurfaceTexture();
+                    mCamera.startPreview();
+                    Log.i(TAG, "Chunking Recording - Prepare SurfaceTexture");
+                    startWhen = System.nanoTime();
+                    st = mStManager.getSurfaceTexture();
+                    Log.i(TAG, "Chunking Recording - getSurfaceTexture");
+                    frameCount = 0;
+                }else
+                    drainEncoder(false);
+
                 frameCount++;
 
                 // Acquire a new frame of input, and render it to the Surface.  If we had a
@@ -165,7 +182,7 @@ public class ChunkedHWRecorder {
         }
     }
 
-    private void stopRecording(){
+    public void stopRecording(){
         recording = false;
     }
 
@@ -216,7 +233,7 @@ public class ChunkedHWRecorder {
         Log.d(TAG, MIME_TYPE + " output " + encWidth + "x" + encHeight + " @" + encBitRate);
 
         try {
-            prepareCamera(encWidth, encHeight);
+            prepareCamera(encWidth, encHeight, Camera.CameraInfo.CAMERA_FACING_FRONT);
             prepareEncoder(encWidth, encHeight, encBitRate);
             mInputSurface.makeCurrent();
             prepareSurfaceTexture();
@@ -359,7 +376,7 @@ public class ChunkedHWRecorder {
 
     /**
      * Configures encoder and muxer state, and prepares the input Surface.  Initializes
-     * mEncoder1, mMuxer1, mInputSurface, mBufferInfo, mTrackIndex, and mMuxerStarted.
+     * mEncoder, mMuxer, mInputSurface, mBufferInfo, mTrackIndex, and mMuxerStarted.
      */
     private void prepareEncoder(int width, int height, int bitRate) {
         mBufferInfo = new MediaCodec.BufferInfo();
@@ -389,7 +406,8 @@ public class ChunkedHWRecorder {
 
         // Output filename.  Ideally this would use Context.getFilesDir() rather than a
         // hard-coded output directory.
-        String outputPath = OUTPUT_DIR + "test." + width + "x" + height + ".mp4";
+        currentChunk ++;
+        String outputPath = OUTPUT_DIR + "chunktest." + width + "x" + height + String.valueOf(currentChunk) + ".mp4";
         Log.i(TAG, "Output file is " + outputPath);
 
 
