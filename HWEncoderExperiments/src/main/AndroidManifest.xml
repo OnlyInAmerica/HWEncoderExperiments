@@ -21,7 +21,11 @@
             android:theme="@style/AppTheme">
 
         <activity
-                android:name="net.openwatch.hwencoderexperiments.CameraToMpegTestActivity"
+                android:name=".HWRecorderActivity"
+                android:screenOrientation="portrait">
+        </activity>
+        <activity
+                android:name=".ChunkedHWRecorderActivity"
                 android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>

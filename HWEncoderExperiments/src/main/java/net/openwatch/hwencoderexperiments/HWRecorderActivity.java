@@ -52,7 +52,7 @@ import java.nio.FloatBuffer;
  * (This was derived from bits and pieces of CTS tests, and is packaged as such, but is not
  * currently part of CTS.)
  */
-public class CameraToMpegTestActivity extends Activity {
+public class HWRecorderActivity extends Activity {
     private static final String TAG = "CameraToMpegTest";
     private static final boolean VERBOSE = true;           // lots of logging
     // where to put the output file (note: /sdcard requires WRITE_EXTERNAL_STORAGE permission)
@@ -455,16 +455,16 @@ public class CameraToMpegTestActivity extends Activity {
      */
     private static class CameraToMpegWrapper implements Runnable {
         private Throwable mThrowable;
-        private CameraToMpegTestActivity mTest;
+        private HWRecorderActivity mTest;
 
-        private CameraToMpegWrapper(CameraToMpegTestActivity test) {
+        private CameraToMpegWrapper(HWRecorderActivity test) {
             mTest = test;
         }
 
         /**
          * Entry point.
          */
-        public static void runTest(CameraToMpegTestActivity obj) throws Throwable {
+        public static void runTest(HWRecorderActivity obj) throws Throwable {
             CameraToMpegWrapper wrapper = new CameraToMpegWrapper(obj);
             Thread th = new Thread(wrapper, "codec test");
             th.start();
@@ -627,7 +627,7 @@ public class CameraToMpegTestActivity extends Activity {
     private static class SurfaceTextureManager
             implements SurfaceTexture.OnFrameAvailableListener {
         private SurfaceTexture mSurfaceTexture;
-        private CameraToMpegTestActivity.STextureRender mTextureRender;
+        private HWRecorderActivity.STextureRender mTextureRender;
         private Object mFrameSyncObject = new Object();     // guards mFrameAvailable
         private boolean mFrameAvailable;
 
@@ -635,7 +635,7 @@ public class CameraToMpegTestActivity extends Activity {
          * Creates instances of TextureRender and SurfaceTexture.
          */
         public SurfaceTextureManager() {
-            mTextureRender = new CameraToMpegTestActivity.STextureRender();
+            mTextureRender = new HWRecorderActivity.STextureRender();
             mTextureRender.surfaceCreated();
 
             if (VERBOSE) Log.d(TAG, String.format("textureID=%d", mTextureRender.getTextureId()) );
