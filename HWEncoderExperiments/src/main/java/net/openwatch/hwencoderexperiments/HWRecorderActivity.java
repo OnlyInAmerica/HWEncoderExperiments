@@ -1,83 +1,83 @@
 package net.openwatch.hwencoderexperiments;
 
 import android.app.Activity;
+import android.graphics.SurfaceTexture;
+import android.hardware.Camera;
 import android.os.Bundle;
+import android.util.Log;
+import android.view.TextureView;
 import android.view.View;
-import android.widget.Button;
 
-public class HWRecorderActivity extends Activity {
+import java.io.IOException;
+
+public class HWRecorderActivity extends Activity implements TextureView.SurfaceTextureListener{
     private static final String TAG = "CameraToMpegTest";
+
+    Camera mCamera;
+    AvcEncoder mEncoder;
     boolean recording = false;
-    ChunkedHWRecorder chunkedHWRecorder;
-    Button theButton;
+    int bufferSize = 460800;
 
     protected void onCreate (Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_camera_to_mpeg_test);
+        TextureView tv = (TextureView) findViewById(R.id.cameraPreview);
+        tv.setSurfaceTextureListener(this);
     }
 
-    public void onRunTestButtonClicked(View v){
-        if(!recording){
-            try {
-                testEncodeCameraToMp4();
-                recording = true;
-                ((Button) v).setText("Stop Recording");
-            } catch (Throwable throwable) {
-                throwable.printStackTrace();
-            }
+    public void onRecordButtonClick(View v){
+        recording = !recording;
+        Log.i(TAG, "Record button hit. Start: " + String.valueOf(recording));
+
+        if(recording){
+            mEncoder = new AvcEncoder(getApplicationContext());
+
+            mCamera.addCallbackBuffer(new byte[bufferSize]);
+            mCamera.addCallbackBuffer(new byte[bufferSize]);
+            mCamera.addCallbackBuffer(new byte[bufferSize]);
+            mCamera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
+                @Override
+                public void onPreviewFrame(byte[] data, Camera camera) {
+                    mEncoder.offerEncoder(data);
+                    mCamera.addCallbackBuffer(data);
+                }
+            });
         }else{
-            chunkedHWRecorder.stopRecording();
-            recording = false;
-            ((Button) v).setText("Start Recording");
+            if(mEncoder != null){
+                mEncoder.stop();
+            }
+
         }
     }
 
-    /**
-     * test entry point
-     */
-    public void testEncodeCameraToMp4() throws Throwable {
-        chunkedHWRecorder = new ChunkedHWRecorder();
-        CameraToMpegWrapper.runTest(chunkedHWRecorder);
+    @Override
+    public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
+        mCamera = Camera.open();
+
+        try {
+            mCamera.setPreviewTexture(surface);
+            mCamera.setDisplayOrientation(90);
+            mCamera.startPreview();
+        } catch (IOException ioe) {
+            ioe.printStackTrace();
+        }
     }
 
+    @Override
+    public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
 
-    /**
-     * Wraps encodeCameraToMpeg().  This is necessary because SurfaceTexture will try to use
-     * the looper in the current thread if one exists, and the CTS tests create one on the
-     * test thread.
-     * <p/>
-     * The wrapper propagates exceptions thrown by the worker thread back to the caller.
-     */
-    private static class CameraToMpegWrapper implements Runnable {
-        private Throwable mThrowable;
-        private ChunkedHWRecorder mTest;
+    }
 
-        private CameraToMpegWrapper(ChunkedHWRecorder test) {
-            mTest = test;
-        }
+    @Override
+    public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
+        mCamera.stopPreview();
+        mCamera.release();
+        return false;
+    }
 
-        /**
-         * Entry point.
-         */
-        public static void runTest(ChunkedHWRecorder obj) throws Throwable {
-            CameraToMpegWrapper wrapper = new CameraToMpegWrapper(obj);
-            Thread th = new Thread(wrapper, "codec test");
-            th.start();
-            // When th.join() is called, blocks thread which catches onFrameAvailable
-            //th.join();
-            if (wrapper.mThrowable != null) {
-                throw wrapper.mThrowable;
-            }
-        }
+    @Override
+    public void onSurfaceTextureUpdated(SurfaceTexture surface) {
 
-        @Override
-        public void run() {
-            try {
-                mTest.startRecording(null);
-            } catch (Throwable th) {
-                mThrowable = th;
-            }
-        }
     }
 
 }
