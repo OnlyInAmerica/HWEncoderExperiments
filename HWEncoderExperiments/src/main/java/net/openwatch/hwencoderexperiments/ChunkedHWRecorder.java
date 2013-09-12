@@ -53,7 +53,7 @@ import java.nio.FloatBuffer;
  */
 public class ChunkedHWRecorder {
     private static final String TAG = "CameraToMpegTest";
-    private static final boolean VERBOSE = true;           // lots of logging
+    private static final boolean VERBOSE = false;           // lots of logging
     // where to put the output file (note: /sdcard requires WRITE_EXTERNAL_STORAGE permission)
     private static String OUTPUT_DIR = "/sdcard/chunktest/";
     // parameters for the encoder
@@ -118,23 +118,25 @@ public class ChunkedHWRecorder {
             while (recording) {
                 // Feed any pending encoder output into the muxer.
                 // Chunk encoding
-                if ((frameCount % framesPerChunk) == 0 && frameCount != 0){
-                    Log.i(TAG, "Chunking Recording");
-                    drainEncoder(true);
+                if ((frameCount % framesPerChunk) == 0 && frameCount != 0){         // Trial 2              // Trial 1
+                    Log.i(TAG, "Chunking Recording");                                                       // 12:55:46.517  + 0 MS
+                    drainEncoder(true);                                             // 13:02:36.345 + 0 MS
                     releaseEncoder();
-                    Log.i(TAG, "Chunking Recording - Drained & Released Encoder");
-                    prepareEncoder(encWidth, encHeight, encBitRate);
-                    Log.i(TAG, "Chunking Recording - Prepare new Encoder");
-                    mInputSurface.makeCurrent();
-                    Log.i(TAG, "Chunking Recording - Make inputSurface current");
-                    mCamera.stopPreview();
+                    Log.i(TAG, "Chunking Recording - Drained & Released Encoder");                          // 12:55:46.587  + 70 MS
+                    prepareEncoder(encWidth, encHeight, encBitRate);                // 13:02:36.407 + 62 MS
+                    Log.i(TAG, "Chunking Recording - Prepare new Encoder");                                 // 12:55:46.728  + 41 MS
+                    mInputSurface.makeCurrent();                                    // 13:02:36.540 + 133 MS
+                    Log.i(TAG, "Chunking Recording - Make inputSurface current");                           // 12:55:46.743  + 15 MS
+                    mCamera.stopPreview();                                          // 13:02:36.564 + 24 MS
+                    Log.i(TAG, "Chunking Recording - StopPreview");                 // 13:02:36.665 + 101 MS
                     prepareSurfaceTexture();
+                    Log.i(TAG, "Chunking Recording - prepareSurfaceTexture");       // 13:02:36.681 + 16 MS
                     mCamera.startPreview();
-                    Log.i(TAG, "Chunking Recording - Prepare SurfaceTexture");
-                    startWhen = System.nanoTime();
+                    Log.i(TAG, "Chunking Recording - Prepare startPreview");                                // 12:55:47.150  + 407 MS
+                    startWhen = System.nanoTime();                                  // 13:02:36.954 + 273 MS
                     st = mStManager.getSurfaceTexture();
-                    Log.i(TAG, "Chunking Recording - getSurfaceTexture");
-                    frameCount = 0;
+                    Log.i(TAG, "Chunking Recording - getSurfaceTexture");                                   // 12:55:47.150
+                    frameCount = 0;                                                 // 13:02:36.954 + 0 MS
                 }else
                     drainEncoder(false);
 
@@ -307,7 +309,7 @@ public class ChunkedHWRecorder {
         int numCameras = Camera.getNumberOfCameras();
         for (int i = 0; i < numCameras; i++) {
             Camera.getCameraInfo(i, info);
-            if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+            if (info.facing == cameraType) {
                 mCamera = Camera.open(i);
                 break;
             }
