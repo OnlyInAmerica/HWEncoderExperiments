@@ -18,7 +18,6 @@
 
 package net.openwatch.hwencoderexperiments;
 
-import android.app.Activity;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.media.MediaCodec;
@@ -26,7 +25,6 @@ import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.media.MediaMuxer;
 import android.opengl.*;
-import android.os.Bundle;
 import android.util.Log;
 import android.view.Surface;
 import android.view.View;
@@ -52,16 +50,16 @@ import java.nio.FloatBuffer;
  * (This was derived from bits and pieces of CTS tests, and is packaged as such, but is not
  * currently part of CTS.)
  */
-public class ChunkedHWRecorderActivity extends Activity {
+public class ChunkedHWRecorder {
     private static final String TAG = "CameraToMpegTest";
     private static final boolean VERBOSE = true;           // lots of logging
     // where to put the output file (note: /sdcard requires WRITE_EXTERNAL_STORAGE permission)
-    private static final String OUTPUT_DIR = "/sdcard/";
+    private static String OUTPUT_DIR = "/sdcard/";
     // parameters for the encoder
     private static final String MIME_TYPE = "video/avc";    // H.264 Advanced Video Coding
     private static final int FRAME_RATE = 30;               // 30fps
     private static final int IFRAME_INTERVAL = 5;           // 5 seconds between I-frames
-    private static final long DURATION_SEC = 8;             // 8 seconds of video
+    private static final long CHUNK_DURATION_SEC = 5;       // Duration of video chunks
     // Fragment shader that swaps color channels around.
     private static final String SWAPPED_FRAGMENT_SHADER =
             "#extension GL_OES_EGL_image_external : require\n" +
@@ -72,9 +70,13 @@ public class ChunkedHWRecorderActivity extends Activity {
                     "  gl_FragColor = texture2D(sTexture, vTextureCoord).gbra;\n" +
                     "}\n";
     // encoder / muxer state
-    private MediaCodec mEncoder;
+    private MediaCodec mEncoder1;
+    private MediaCodec mEncoder2;
+    private MediaCodec mCurrentEncoder;
     private CodecInputSurface mInputSurface;
-    private MediaMuxer mMuxer;
+    private MediaMuxer mMuxer1;
+    private MediaMuxer mMuxer2;
+    private MediaMuxer mCurrentMuxer;
     private int mTrackIndex;
     private boolean mMuxerStarted;
     // camera state
@@ -83,10 +85,9 @@ public class ChunkedHWRecorderActivity extends Activity {
     // allocate one of these up front so we don't need to do it every time
     private MediaCodec.BufferInfo mBufferInfo;
 
-    protected void onCreate (Bundle savedInstanceState){
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_camera_to_mpeg_test);
-    }
+    // user state
+    private boolean recording = false;
+
 
     public void onRunTestButtonClicked(View v){
         try {
@@ -94,6 +95,78 @@ public class ChunkedHWRecorderActivity extends Activity {
         } catch (Throwable throwable) {
             throwable.printStackTrace();
         }
+    }
+
+    public void startRecording(String outputDir){
+        OUTPUT_DIR = outputDir;
+
+        int encWidth = 640;
+        int encHeight = 480;
+        int encBitRate = 6000000;      // Mbps
+        int framesPerChunk = (int) CHUNK_DURATION_SEC * FRAME_RATE;
+        Log.d(TAG, MIME_TYPE + " output " + encWidth + "x" + encHeight + " @" + encBitRate);
+
+        try {
+            prepareCamera(encWidth, encHeight, Camera.CameraInfo.CAMERA_FACING_BACK);
+            prepareEncoder(encWidth, encHeight, encBitRate);
+            mInputSurface.makeCurrent();
+            prepareSurfaceTexture();
+
+            mCamera.startPreview();
+            long startWhen = System.nanoTime();
+            SurfaceTexture st = mStManager.getSurfaceTexture();
+            int frameCount = 0;
+            recording = true;
+            while (recording) {
+                // Feed any pending encoder output into the muxer.
+                drainEncoder(false);
+
+                // Chunk encoding
+                if ((frameCount % framesPerChunk) == 0 && frameCount != 0){
+                    // finalize mCurrentEncoder
+                    // swap mCurrentEncoder
+                    // initialize mCurrentEncoder
+                }
+                frameCount++;
+
+                // Acquire a new frame of input, and render it to the Surface.  If we had a
+                // GLSurfaceView we could switch EGL contexts and call drawImage() a second
+                // time to render it on screen.  The texture can be shared between contexts by
+                // passing the GLSurfaceView's EGLContext as eglCreateContext()'s share_context
+                // argument.
+                mStManager.awaitNewImage();
+                mStManager.drawImage();
+
+                // Set the presentation time stamp from the SurfaceTexture's time stamp.  This
+                // will be used by MediaMuxer to set the PTS in the video.
+                if (VERBOSE) {
+                    Log.d(TAG, "present: " +
+                            ((st.getTimestamp() - startWhen) / 1000000.0) + "ms");
+                }
+                mInputSurface.setPresentationTime(st.getTimestamp());
+
+                // Submit it to the encoder.  The eglSwapBuffers call will block if the input
+                // is full, which would be bad if it stayed full until we dequeued an output
+                // buffer (which we can't do, since we're stuck here).  So long as we fully drain
+                // the encoder before supplying additional input, the system guarantees that we
+                // can supply another frame without blocking.
+                if (VERBOSE) Log.d(TAG, "sending frame to encoder");
+                mInputSurface.swapBuffers();
+            }
+
+            // send end-of-stream to encoder, and drain remaining output
+            drainEncoder(true);
+        } finally {
+            recording = false;
+            // release everything we grabbed
+            releaseCamera();
+            releaseEncoder();
+            releaseSurfaceTexture();
+        }
+    }
+
+    private void stopRecording(){
+        recording = false;
     }
 
     /**
@@ -151,7 +224,7 @@ public class ChunkedHWRecorderActivity extends Activity {
             mCamera.startPreview();
 
             long startWhen = System.nanoTime();
-            long desiredEnd = startWhen + DURATION_SEC * 1000000000L;
+            long desiredEnd = startWhen + CHUNK_DURATION_SEC * 1000000000L;
             SurfaceTexture st = mStManager.getSurfaceTexture();
             int frameCount = 0;
 
@@ -212,9 +285,9 @@ public class ChunkedHWRecorderActivity extends Activity {
      * <p/>
      * Opens a Camera and sets parameters.  Does not start preview.
      */
-    private void prepareCamera(int encWidth, int encHeight) {
-        if (mCamera != null) {
-            throw new RuntimeException("camera already initialized");
+    private void prepareCamera(int encWidth, int encHeight, int cameraType) {
+        if (cameraType != Camera.CameraInfo.CAMERA_FACING_FRONT && cameraType != Camera.CameraInfo.CAMERA_FACING_BACK) {
+            throw new RuntimeException("Invalid cameraType");
         }
 
         Camera.CameraInfo info = new Camera.CameraInfo();
@@ -228,7 +301,7 @@ public class ChunkedHWRecorderActivity extends Activity {
                 break;
             }
         }
-        if (mCamera == null) {
+        if (mCamera == null && cameraType == Camera.CameraInfo.CAMERA_FACING_FRONT) {
             Log.d(TAG, "No front-facing camera found; opening default");
             mCamera = Camera.open();    // opens first back-facing camera
         }
@@ -286,7 +359,7 @@ public class ChunkedHWRecorderActivity extends Activity {
 
     /**
      * Configures encoder and muxer state, and prepares the input Surface.  Initializes
-     * mEncoder, mMuxer, mInputSurface, mBufferInfo, mTrackIndex, and mMuxerStarted.
+     * mEncoder1, mMuxer1, mInputSurface, mBufferInfo, mTrackIndex, and mMuxerStarted.
      */
     private void prepareEncoder(int width, int height, int bitRate) {
         mBufferInfo = new MediaCodec.BufferInfo();
@@ -309,10 +382,10 @@ public class ChunkedHWRecorderActivity extends Activity {
         // you will likely want to defer instantiation of CodecInputSurface until after the
         // "display" EGL context is created, then modify the eglCreateContext call to
         // take eglGetCurrentContext() as the share_context argument.
-        mEncoder = MediaCodec.createEncoderByType(MIME_TYPE);
-        mEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
-        mInputSurface = new CodecInputSurface(mEncoder.createInputSurface());
-        mEncoder.start();
+        mEncoder1 = MediaCodec.createEncoderByType(MIME_TYPE);
+        mEncoder1.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+        mInputSurface = new CodecInputSurface(mEncoder1.createInputSurface());
+        mEncoder1.start();
 
         // Output filename.  Ideally this would use Context.getFilesDir() rather than a
         // hard-coded output directory.
@@ -327,7 +400,7 @@ public class ChunkedHWRecorderActivity extends Activity {
         // We're not actually interested in multiplexing audio.  We just want to convert
         // the raw H.264 elementary stream we get from MediaCodec into a .mp4 file.
         try {
-            mMuxer = new MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+            mMuxer1 = new MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
         } catch (IOException ioe) {
             throw new RuntimeException("MediaMuxer creation failed", ioe);
         }
@@ -341,19 +414,19 @@ public class ChunkedHWRecorderActivity extends Activity {
      */
     private void releaseEncoder() {
         if (VERBOSE) Log.d(TAG, "releasing encoder objects");
-        if (mEncoder != null) {
-            mEncoder.stop();
-            mEncoder.release();
-            mEncoder = null;
+        if (mEncoder1 != null) {
+            mEncoder1.stop();
+            mEncoder1.release();
+            mEncoder1 = null;
         }
         if (mInputSurface != null) {
             mInputSurface.release();
             mInputSurface = null;
         }
-        if (mMuxer != null) {
-            mMuxer.stop();
-            mMuxer.release();
-            mMuxer = null;
+        if (mMuxer1 != null) {
+            mMuxer1.stop();
+            mMuxer1.release();
+            mMuxer1 = null;
         }
     }
 
@@ -373,12 +446,12 @@ public class ChunkedHWRecorderActivity extends Activity {
 
         if (endOfStream) {
             if (VERBOSE) Log.d(TAG, "sending EOS to encoder");
-            mEncoder.signalEndOfInputStream();
+            mEncoder1.signalEndOfInputStream();
         }
 
-        ByteBuffer[] encoderOutputBuffers = mEncoder.getOutputBuffers();
+        ByteBuffer[] encoderOutputBuffers = mEncoder1.getOutputBuffers();
         while (true) {
-            int encoderStatus = mEncoder.dequeueOutputBuffer(mBufferInfo, TIMEOUT_USEC);
+            int encoderStatus = mEncoder1.dequeueOutputBuffer(mBufferInfo, TIMEOUT_USEC);
             if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
                 // no output available yet
                 if (!endOfStream) {
@@ -388,18 +461,18 @@ public class ChunkedHWRecorderActivity extends Activity {
                 }
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
                 // not expected for an encoder
-                encoderOutputBuffers = mEncoder.getOutputBuffers();
+                encoderOutputBuffers = mEncoder1.getOutputBuffers();
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 // should happen before receiving buffers, and should only happen once
                 if (mMuxerStarted) {
                     throw new RuntimeException("format changed twice");
                 }
-                MediaFormat newFormat = mEncoder.getOutputFormat();
+                MediaFormat newFormat = mEncoder1.getOutputFormat();
                 Log.d(TAG, "encoder output format changed: " + newFormat);
 
                 // now that we have the Magic Goodies, start the muxer
-                mTrackIndex = mMuxer.addTrack(newFormat);
-                mMuxer.start();
+                mTrackIndex = mMuxer1.addTrack(newFormat);
+                mMuxer1.start();
                 mMuxerStarted = true;
             } else if (encoderStatus < 0) {
                 Log.w(TAG, "unexpected result from encoder.dequeueOutputBuffer: " +
@@ -428,11 +501,11 @@ public class ChunkedHWRecorderActivity extends Activity {
                     encodedData.position(mBufferInfo.offset);
                     encodedData.limit(mBufferInfo.offset + mBufferInfo.size);
 
-                    mMuxer.writeSampleData(mTrackIndex, encodedData, mBufferInfo);
+                    mMuxer1.writeSampleData(mTrackIndex, encodedData, mBufferInfo);
                     if (VERBOSE) Log.d(TAG, "sent " + mBufferInfo.size + " bytes to muxer");
                 }
 
-                mEncoder.releaseOutputBuffer(encoderStatus, false);
+                mEncoder1.releaseOutputBuffer(encoderStatus, false);
 
                 if ((mBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                     if (!endOfStream) {
@@ -455,16 +528,16 @@ public class ChunkedHWRecorderActivity extends Activity {
      */
     private static class CameraToMpegWrapper implements Runnable {
         private Throwable mThrowable;
-        private ChunkedHWRecorderActivity mTest;
+        private ChunkedHWRecorder mTest;
 
-        private CameraToMpegWrapper(ChunkedHWRecorderActivity test) {
+        private CameraToMpegWrapper(ChunkedHWRecorder test) {
             mTest = test;
         }
 
         /**
          * Entry point.
          */
-        public static void runTest(ChunkedHWRecorderActivity obj) throws Throwable {
+        public static void runTest(ChunkedHWRecorder obj) throws Throwable {
             CameraToMpegWrapper wrapper = new CameraToMpegWrapper(obj);
             Thread th = new Thread(wrapper, "codec test");
             th.start();
@@ -627,7 +700,7 @@ public class ChunkedHWRecorderActivity extends Activity {
     private static class SurfaceTextureManager
             implements SurfaceTexture.OnFrameAvailableListener {
         private SurfaceTexture mSurfaceTexture;
-        private ChunkedHWRecorderActivity.STextureRender mTextureRender;
+        private ChunkedHWRecorder.STextureRender mTextureRender;
         private Object mFrameSyncObject = new Object();     // guards mFrameAvailable
         private boolean mFrameAvailable;
 
@@ -635,7 +708,7 @@ public class ChunkedHWRecorderActivity extends Activity {
          * Creates instances of TextureRender and SurfaceTexture.
          */
         public SurfaceTextureManager() {
-            mTextureRender = new ChunkedHWRecorderActivity.STextureRender();
+            mTextureRender = new ChunkedHWRecorder.STextureRender();
             mTextureRender.surfaceCreated();
 
             if (VERBOSE) Log.d(TAG, String.format("textureID=%d", mTextureRender.getTextureId()) );
