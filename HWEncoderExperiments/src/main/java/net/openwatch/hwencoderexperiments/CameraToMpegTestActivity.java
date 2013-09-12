@@ -468,7 +468,8 @@ public class CameraToMpegTestActivity extends Activity {
             CameraToMpegWrapper wrapper = new CameraToMpegWrapper(obj);
             Thread th = new Thread(wrapper, "codec test");
             th.start();
-            th.join();
+            // When th.join() is called, blocks thread which catches onFrameAvailable
+            //th.join();
             if (wrapper.mThrowable != null) {
                 throw wrapper.mThrowable;
             }
@@ -516,6 +517,7 @@ public class CameraToMpegTestActivity extends Activity {
          * Prepares EGL.  We want a GLES 2.0 context and a surface that supports recording.
          */
         private void eglSetup() {
+            if(VERBOSE) Log.i(TAG, "Creating EGL14 Surface");
             mEGLDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
             if (mEGLDisplay == EGL14.EGL_NO_DISPLAY) {
                 throw new RuntimeException("unable to get EGL14 display");
