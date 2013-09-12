@@ -21,10 +21,7 @@ package net.openwatch.hwencoderexperiments;
 import android.app.Activity;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
-import android.media.MediaCodec;
-import android.media.MediaCodecInfo;
-import android.media.MediaFormat;
-import android.media.MediaMuxer;
+import android.media.*;
 import android.opengl.*;
 import android.os.Bundle;
 import android.util.Log;
@@ -35,6 +32,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+import java.util.Date;
 
 /**
  * Record video from the camera preview and encode it as an MP4 file.  Demonstrates the use
@@ -82,6 +80,8 @@ public class CameraToMpegTestActivity extends Activity {
     private SurfaceTextureManager mStManager;
     // allocate one of these up front so we don't need to do it every time
     private MediaCodec.BufferInfo mBufferInfo;
+
+    private MediaRecorder mMediaRecorder;
 
     protected void onCreate (Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
@@ -140,6 +140,7 @@ public class CameraToMpegTestActivity extends Activity {
         int encWidth = 640;
         int encHeight = 480;
         int encBitRate = 6000000;      // Mbps
+        boolean startedMediaRecorder = false;
         Log.d(TAG, MIME_TYPE + " output " + encWidth + "x" + encHeight + " @" + encBitRate);
 
         try {
@@ -149,6 +150,9 @@ public class CameraToMpegTestActivity extends Activity {
             prepareSurfaceTexture();
 
             mCamera.startPreview();
+
+            prepareMediaRecorder();
+            mMediaRecorder.start();
 
             long startWhen = System.nanoTime();
             long desiredEnd = startWhen + DURATION_SEC * 1000000000L;
@@ -200,10 +204,30 @@ public class CameraToMpegTestActivity extends Activity {
             // send end-of-stream to encoder, and drain remaining output
             drainEncoder(true);
         } finally {
+            mMediaRecorder.stop();
+            releaseMediaRecorder();
             // release everything we grabbed
             releaseCamera();
             releaseEncoder();
             releaseSurfaceTexture();
+        }
+    }
+
+    private void prepareMediaRecorder(){
+        mCamera.unlock();
+
+        mMediaRecorder = new MediaRecorder();
+        mMediaRecorder.setCamera(mCamera);
+        mMediaRecorder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER);
+        mMediaRecorder.setVideoSource(MediaRecorder.VideoSource.CAMERA);
+        mMediaRecorder.setProfile(CamcorderProfile.get(CamcorderProfile.QUALITY_480P));
+        mMediaRecorder.setOutputFile(FileUtils.createTempFileInRootAppStorage(getApplicationContext(), String.valueOf(new Date().getTime()) + ".avi").getAbsolutePath());
+
+        try {
+            mMediaRecorder.prepare();
+        } catch (IOException e) {
+            e.printStackTrace();
+            releaseMediaRecorder();
         }
     }
 
@@ -255,6 +279,16 @@ public class CameraToMpegTestActivity extends Activity {
             mCamera.stopPreview();
             mCamera.release();
             mCamera = null;
+        }
+    }
+
+    private void releaseMediaRecorder(){
+        if (mMediaRecorder != null) {
+            mMediaRecorder.reset();         // clear recorder configuration
+            mMediaRecorder.release();       // release the recorder object
+            mMediaRecorder = null;
+            if(mCamera != null)
+                mCamera.lock();             // lock camera for later use
         }
     }
 
@@ -720,7 +754,8 @@ public class CameraToMpegTestActivity extends Activity {
             if (VERBOSE) Log.d(TAG, "new frame available");
             synchronized (mFrameSyncObject) {
                 if (mFrameAvailable) {
-                    throw new RuntimeException("mFrameAvailable already set, frame could be dropped");
+                    Log.e(TAG, "onFrameAvailable duplicate frame");
+                    //throw new RuntimeException("mFrameAvailable already set, frame could be dropped");
                 }
                 mFrameAvailable = true;
                 mFrameSyncObject.notifyAll();
