@@ -516,7 +516,7 @@ public class ChunkedHWRecorder {
                     encodedData.limit(mBufferInfo.offset + mBufferInfo.size);
 
                     mMuxer.writeSampleData(mTrackIndex, encodedData, mBufferInfo);
-                    if (VERBOSE) Log.d(TAG, "sent " + mBufferInfo.size + " bytes to muxer with pts: " + mBufferInfo.presentationTimeUs);
+                    if (VERBOSE) Log.d(TAG, "sent " + mBufferInfo.size + " bytes to muxer with presentationTimeNs: " + mBufferInfo.presentationTimeUs);
                 }
 
                 mEncoder.releaseOutputBuffer(encoderStatus, false);

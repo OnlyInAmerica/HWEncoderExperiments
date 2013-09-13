@@ -9,6 +9,7 @@ import android.view.TextureView;
 import android.view.View;
 
 import java.io.IOException;
+import java.util.List;
 
 public class HWRecorderActivity extends Activity implements TextureView.SurfaceTextureListener{
     private static final String TAG = "CameraToMpegTest";
@@ -18,6 +19,9 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
     boolean recording = false;
     int bufferSize = 460800;
     int numFramesPreviewed = 0;
+
+    // testing
+    long lastFrameTime = 0;
 
     protected void onCreate (Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
@@ -40,11 +44,13 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
                 @Override
                 public void onPreviewFrame(byte[] data, Camera camera) {
                     numFramesPreviewed++;
-                    //Log.i(TAG, "onPreviewFrame");
+                    //Log.i(TAG, "Inter-frame time: " + (System.currentTimeMillis() - lastFrameTime) + " ms");
                     mEncoder.offerEncoder(data);
                     mCamera.addCallbackBuffer(data);
+                    lastFrameTime = System.currentTimeMillis();
                 }
             });
+            lastFrameTime = System.currentTimeMillis();
         }else{
             mCamera.setPreviewCallbackWithBuffer(null);
             if(mEncoder != null){
@@ -61,6 +67,11 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
 
         try {
             mCamera.setPreviewTexture(surface);
+            Camera.Parameters parameters = mCamera.getParameters();
+            List<int[]> fpsRanges = parameters.getSupportedPreviewFpsRange();
+            int[] maxFpsRange = fpsRanges.get(fpsRanges.size()-1);
+            parameters.setPreviewFpsRange(maxFpsRange[0], maxFpsRange[1]);
+            mCamera.setParameters(parameters);
             mCamera.setDisplayOrientation(90);
             mCamera.startPreview();
         } catch (IOException ioe) {

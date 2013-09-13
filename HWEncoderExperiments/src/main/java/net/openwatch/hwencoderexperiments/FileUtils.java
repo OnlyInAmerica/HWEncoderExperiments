@@ -86,7 +86,10 @@ public class FileUtils {
             if(filename != null){
                 if(!extension.contains("."))
                     extension = "." + extension;
-                output = File.createTempFile(filename, extension, root);
+                output = new File(root, filename + extension);
+                output.createNewFile();
+                //output = File.createTempFile(filename, extension, root);
+                Log.i(TAG, "Created temp file: " + output.getAbsolutePath());
             }
             return output;
         } catch (IOException e) {
