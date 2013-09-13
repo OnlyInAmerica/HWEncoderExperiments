@@ -3,6 +3,8 @@ package net.openwatch.hwencoderexperiments;
 import android.app.Activity;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
+import android.media.MediaCodecInfo;
+import android.media.MediaCodecList;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.TextureView;
@@ -28,6 +30,23 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
         setContentView(R.layout.activity_camera_to_mpeg_test);
         TextureView tv = (TextureView) findViewById(R.id.cameraPreview);
         tv.setSurfaceTextureListener(this);
+
+        // testing
+        /*
+        for(int i = MediaCodecList.getCodecCount() - 1; i >= 0; i--){
+            MediaCodecInfo codecInfo = MediaCodecList.getCodecInfoAt(i);
+            if(codecInfo.isEncoder()){
+                for(String t : codecInfo.getSupportedTypes()){
+                    try{
+                        Log.i("CodecCapability", t);
+                        Log.i("CodecCapability", codecInfo.getCapabilitiesForType(t).toString());
+                    } catch(IllegalArgumentException e){
+                        e.printStackTrace();
+                    }
+                }
+            }
+        }
+        */
     }
 
     public void onRecordButtonClick(View v){

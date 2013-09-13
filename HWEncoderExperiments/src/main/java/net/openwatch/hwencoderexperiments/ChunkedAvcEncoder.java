@@ -1,10 +1,7 @@
 package net.openwatch.hwencoderexperiments;
 
 import android.content.Context;
-import android.media.MediaCodec;
-import android.media.MediaCodecInfo;
-import android.media.MediaFormat;
-import android.media.MediaMuxer;
+import android.media.*;
 import android.util.Log;
 
 import java.io.File;
@@ -64,7 +61,7 @@ public class ChunkedAvcEncoder {
         mediaFormat = MediaFormat.createVideoFormat(MIME_TYPE, 640, 480);
         mediaFormat.setInteger(MediaFormat.KEY_BIT_RATE, 250000);
         mediaFormat.setInteger(MediaFormat.KEY_FRAME_RATE, FRAMES_PER_SECOND);
-        mediaFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+        mediaFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_TI_FormatYUV420PackedSemiPlanar);
         // COLOR_TI_FormatYUV420PackedSemiPlanar works - wrong hue
         // COLOR_FormatYUV420PackedSemiPlanar - crash
         mediaFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 5);
