@@ -40,6 +40,9 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
             mCamera.addCallbackBuffer(new byte[bufferSize]);
             mCamera.addCallbackBuffer(new byte[bufferSize]);
             mCamera.addCallbackBuffer(new byte[bufferSize]);
+            mCamera.addCallbackBuffer(new byte[bufferSize]);
+            mCamera.addCallbackBuffer(new byte[bufferSize]);
+            mCamera.addCallbackBuffer(new byte[bufferSize]);
             mCamera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
                 @Override
                 public void onPreviewFrame(byte[] data, Camera camera) {
@@ -48,11 +51,13 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
                     mEncoder.offerEncoder(data);
                     mCamera.addCallbackBuffer(data);
                     lastFrameTime = System.currentTimeMillis();
+                    if(!recording){ // One frame must be sent with EOS flag after stop requested
+                        camera.setPreviewCallbackWithBuffer(null);
+                    }
                 }
             });
             lastFrameTime = System.currentTimeMillis();
         }else{
-            mCamera.setPreviewCallbackWithBuffer(null);
             if(mEncoder != null){
                 mEncoder.stop();
             }
@@ -69,7 +74,7 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
             mCamera.setPreviewTexture(surface);
             Camera.Parameters parameters = mCamera.getParameters();
             List<int[]> fpsRanges = parameters.getSupportedPreviewFpsRange();
-            int[] maxFpsRange = fpsRanges.get(fpsRanges.size()-1);
+            int[] maxFpsRange = fpsRanges.get(fpsRanges.size() - 1);
             parameters.setPreviewFpsRange(maxFpsRange[0], maxFpsRange[1]);
             mCamera.setParameters(parameters);
             mCamera.setDisplayOrientation(90);

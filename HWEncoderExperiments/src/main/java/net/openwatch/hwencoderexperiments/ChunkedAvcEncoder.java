@@ -55,7 +55,7 @@ public class ChunkedAvcEncoder {
     private void prepare(){
         frameCount = 0;
         eosReceived = false;
-        eosSentToEncoder = true;
+        eosSentToEncoder = false;
         framesPerChunk = CHUNK_DURATION_SEC * FRAMES_PER_SECOND;
         File f = FileUtils.createTempFileInRootAppStorage(c, "test_" + currentChunk + ".mp4");
 
@@ -111,13 +111,18 @@ public class ChunkedAvcEncoder {
         }
     }
 
+    long lastFrameTime = -1;
     /**
      * External method called by CameraPreviewCallback or similar
      * @param input
      */
     public void offerEncoder(byte[] input){
-        if(!encodingService.isShutdown())
-            encodingService.submit(new EncoderTask(this, input, null, System.nanoTime()));
+        if(!encodingService.isShutdown()){
+            long thisFrameTime = System.nanoTime();
+            encodingService.submit(new EncoderTask(this, input, null, thisFrameTime));
+            lastFrameTime = System.nanoTime();
+        }
+
     }
 
     /**
@@ -127,8 +132,9 @@ public class ChunkedAvcEncoder {
     private void _offerEncoder(byte[] input, long presentationTimeNs) {
         if(frameCount == 0)
             startTime = presentationTimeNs;
-        if(eosSentToEncoder && stopReceived)
+        if(eosSentToEncoder && stopReceived){
             return;
+        }
 
         totalFrameCount ++;
         frameCount ++;
@@ -149,8 +155,9 @@ public class ChunkedAvcEncoder {
                 inputBuffer.clear();
                 inputBuffer.put(input);
                 long presentationTimeUs = (presentationTimeNs - startTime) / 1000;
-                Log.i(TAG, "Attempt to set PTS: " + presentationTimeUs);
+                //Log.i(TAG, "Attempt to set PTS: " + presentationTimeUs);
                 if(eosReceived){
+                    Log.i(TAG, "EOS received in offerEncoder");
                     mEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, presentationTimeUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
                     close();
                     eosSentToEncoder = true;
@@ -159,9 +166,9 @@ public class ChunkedAvcEncoder {
                         currentChunk++;
                         prepare();
                     }else{
+                        Log.i(TAG, "Stopping Encoding Service");
                         encodingService.shutdown();
                     }
-
                 }else
                     mEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, presentationTimeUs, 0);
             }
@@ -283,9 +290,7 @@ public class ChunkedAvcEncoder {
                 case FINALIZE_ENCODER:
                     setFinalizeEncoderParams();
                     break;
-
             }
-
         }
 
         public EncoderTask(ChunkedAvcEncoder encoder, byte[] video_data, short[] audio_data, long pts){
