@@ -14,9 +14,10 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
     private static final String TAG = "CameraToMpegTest";
 
     Camera mCamera;
-    AvcEncoder mEncoder;
+    ChunkedAvcEncoder mEncoder;
     boolean recording = false;
     int bufferSize = 460800;
+    int numFramesPreviewed = 0;
 
     protected void onCreate (Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
@@ -30,7 +31,7 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
         Log.i(TAG, "Record button hit. Start: " + String.valueOf(recording));
 
         if(recording){
-            mEncoder = new AvcEncoder(getApplicationContext());
+            mEncoder = new ChunkedAvcEncoder(getApplicationContext());
 
             mCamera.addCallbackBuffer(new byte[bufferSize]);
             mCamera.addCallbackBuffer(new byte[bufferSize]);
@@ -38,14 +39,18 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
             mCamera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
                 @Override
                 public void onPreviewFrame(byte[] data, Camera camera) {
+                    numFramesPreviewed++;
+                    //Log.i(TAG, "onPreviewFrame");
                     mEncoder.offerEncoder(data);
                     mCamera.addCallbackBuffer(data);
                 }
             });
         }else{
+            mCamera.setPreviewCallbackWithBuffer(null);
             if(mEncoder != null){
                 mEncoder.stop();
             }
+            Log.i(TAG, "HWRecorderActivity saw #frames: " + numFramesPreviewed);
 
         }
     }
