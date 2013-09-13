@@ -10,6 +10,8 @@ import android.util.Log;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Created by davidbrodsky on 9/12/13.
@@ -29,6 +31,8 @@ public class AvcEncoder {
     boolean eosSentToEncoder = false;
     long startTime = 0;
 
+    private ExecutorService encodingService = Executors.newSingleThreadExecutor(); // re-use encodingService
+
     public AvcEncoder(Context c) {
         File f = FileUtils.createTempFileInRootAppStorage(c, "test.mp4");
 
@@ -41,8 +45,6 @@ public class AvcEncoder {
         // COLOR_TI_FormatYUV420PackedSemiPlanar works - wrong hue
         // COLOR_FormatYUV420PackedSemiPlanar - crash
         mediaFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 5);
-
-        //MediaCodecInfo.CodecCapabilities cc = new MediaCodecInfo.CodecCapabilities();
 
         mEncoder = MediaCodec.createEncoderByType("video/avc");
         mEncoder.configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
@@ -71,17 +73,31 @@ public class AvcEncoder {
             mMuxer.stop();
             mMuxer.release();
             mMuxer = null;
+            encodingService.shutdown();
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    // called from Camera.setPreviewCallbackWithBuffer(...) in other class
-    public void offerEncoder(byte[] input) {
+    /**
+     * External method called by CameraPreviewCallback or similar
+     * @param input
+     */
+    public void offerEncoder(byte[] input){
+        if(!encodingService.isShutdown())
+            encodingService.submit(new EncoderTask(this, input, null));
+    }
+
+    /**
+     * Internal method called by encodingService
+     * @param input
+     */
+    private void _offerEncoder(byte[] input) {
         if(startTime == 0)
             startTime = System.nanoTime();
         if(eosSentToEncoder)
             return;
+
         // transfer previously encoded data to muxer
         drainEncoder(false);
         // send current frame data to encoder
@@ -104,35 +120,6 @@ public class AvcEncoder {
         } catch (Throwable t) {
             t.printStackTrace();
         }
-        /*
-        try {
-            ByteBuffer[] inputBuffers = mEncoder.getInputBuffers();
-            ByteBuffer[] outputBuffers = mEncoder.getOutputBuffers();
-            int inputBufferIndex = mEncoder.dequeueInputBuffer(-1);
-            if (inputBufferIndex >= 0) {
-                ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
-                inputBuffer.clear();
-                inputBuffer.put(input);
-                mEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, 0, 0);
-            }
-
-            MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
-            int outputBufferIndex = mEncoder.dequeueOutputBuffer(bufferInfo,0);
-            while (outputBufferIndex >= 0) {
-                ByteBuffer outputBuffer = outputBuffers[outputBufferIndex];
-                byte[] outData = new byte[bufferInfo.size];
-                outputBuffer.get(outData);
-                outputStream.write(outData, 0, outData.length);
-                Log.i("AvcEncoder", outData.length + " bytes written");
-
-                mEncoder.releaseOutputBuffer(outputBufferIndex, false);
-                outputBufferIndex = mEncoder.dequeueOutputBuffer(bufferInfo, 0);
-
-            }
-        } catch (Throwable t) {
-            t.printStackTrace();
-        }
-        */
     }
 
     /**
@@ -217,5 +204,109 @@ public class AvcEncoder {
                 }
             }
         }
+    }
+
+    enum EncoderTaskType{
+        ENCODE_FRAME, /*SHIFT_ENCODER,*/ FINALIZE_ENCODER;
+    }
+
+    private class EncoderTask implements Runnable{
+        private static final String TAG = "encoderTask";
+
+        private AvcEncoder encoder;
+
+        private EncoderTaskType type;
+        boolean is_initialized = false;
+
+        // vars for type ENCODE_FRAME
+        private byte[] video_data;
+        private short[] audio_data;
+
+        public EncoderTask(AvcEncoder encoder, EncoderTaskType type){
+            setEncoder(encoder);
+            this.type = type;
+            switch(type){
+                /*
+                case SHIFT_ENCODER:
+                    setShiftEncoderParams();
+                    break;
+                */
+                case FINALIZE_ENCODER:
+                    setFinalizeEncoderParams();
+                    break;
+            }
+
+        }
+
+        public EncoderTask(AvcEncoder encoder, byte[] video_data, short[] audio_data){
+            setEncoder(encoder);
+            setEncodeFrameParams(video_data, audio_data);
+        }
+
+        public EncoderTask(AvcEncoder encoder){
+            setEncoder(encoder);
+            setFinalizeEncoderParams();
+        }
+
+        private void setEncoder(AvcEncoder encoder){
+            this.encoder = encoder;
+        }
+
+        private void setFinalizeEncoderParams(){
+            is_initialized = true;
+        }
+
+        private void setEncodeFrameParams(byte[] video_data, short[] audio_data){
+            this.video_data = video_data;
+            this.audio_data = audio_data;
+
+            is_initialized = true;
+            this.type = EncoderTaskType.ENCODE_FRAME;
+        }
+
+        /*
+        private void setShiftEncoderParams(){
+            this.type = EncoderTaskType.SHIFT_ENCODER;
+            is_initialized = true;
+        }
+        */
+
+        private void encodeFrame(){
+            if(encoder != null && video_data != null)
+                encoder._offerEncoder(video_data);
+        }
+
+        private void shiftEncoder(){
+        }
+
+        private void finalizeEncoder(){
+        }
+
+        @Override
+        public void run() {
+            if(is_initialized){
+                Log.i(TAG, "run encoderTask type: " + String.valueOf(type));
+                switch(type){
+                    case ENCODE_FRAME:
+                        encodeFrame();
+                        break;
+                    /*
+                    case SHIFT_ENCODER:
+                        shiftEncoder();
+                        break;
+                    */
+                    case FINALIZE_ENCODER:
+                        finalizeEncoder();
+                        break;
+                }
+                // prevent multiple execution of same task
+                is_initialized = false;
+            }
+            else{
+                Log.e(TAG, "run() called but EncoderTask not initialized");
+            }
+
+        }
+
     }
 }
