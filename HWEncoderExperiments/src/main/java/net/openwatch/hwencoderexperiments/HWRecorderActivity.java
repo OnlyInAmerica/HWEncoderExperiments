@@ -22,6 +22,8 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
     int bufferSize = 460800;
     int numFramesPreviewed = 0;
 
+    AudioSoftwarePoller audioPoller;
+
     // testing
     long lastFrameTime = 0;
 
@@ -47,6 +49,7 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
             }
         }
         */
+
     }
 
     public void onRecordButtonClick(View v){
@@ -54,6 +57,9 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
         Log.i(TAG, "Record button hit. Start: " + String.valueOf(recording));
 
         if(recording){
+            audioPoller = new AudioSoftwarePoller();
+            audioPoller.startPolling();
+
             mEncoder = new ChunkedAvcEncoder(getApplicationContext());
 
             mCamera.addCallbackBuffer(new byte[bufferSize]);
@@ -64,14 +70,15 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
             mCamera.addCallbackBuffer(new byte[bufferSize]);
             mCamera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
                 @Override
-                public void onPreviewFrame(byte[] data, Camera camera) {
+                public void onPreviewFrame(byte[] videoFrame, Camera camera) {
                     numFramesPreviewed++;
                     //Log.i(TAG, "Inter-frame time: " + (System.currentTimeMillis() - lastFrameTime) + " ms");
-                    mEncoder.offerEncoder(data);
-                    mCamera.addCallbackBuffer(data);
+                    mEncoder.offerEncoder(videoFrame, audioPoller.emptyBuffer());
+                    mCamera.addCallbackBuffer(videoFrame);
                     lastFrameTime = System.currentTimeMillis();
                     if(!recording){ // One frame must be sent with EOS flag after stop requested
                         camera.setPreviewCallbackWithBuffer(null);
+                        audioPoller.stopPolling();
                     }
                 }
             });
