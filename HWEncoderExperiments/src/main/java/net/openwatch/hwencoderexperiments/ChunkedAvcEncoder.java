@@ -1,7 +1,10 @@
 package net.openwatch.hwencoderexperiments;
 
 import android.content.Context;
-import android.media.*;
+import android.media.MediaCodec;
+import android.media.MediaCodecInfo;
+import android.media.MediaFormat;
+import android.media.MediaMuxer;
 import android.util.Log;
 
 import java.io.File;
@@ -95,7 +98,7 @@ public class ChunkedAvcEncoder {
     }
 
     public void close() {
-        drainEncoder(true);
+        drainEncoder(mEncoder, mBufferInfo, true);
         try {
             mEncoder.stop();
             mEncoder.release();
@@ -142,7 +145,7 @@ public class ChunkedAvcEncoder {
         }
 
         // transfer previously encoded data to muxer
-        drainEncoder(false);
+        drainEncoder(mEncoder, mBufferInfo, false);
         // send current frame data to encoder
         try {
             ByteBuffer[] inputBuffers = mEncoder.getInputBuffers();
@@ -184,13 +187,13 @@ public class ChunkedAvcEncoder {
      * We're just using the muxer to get a .mp4 file (instead of a raw H.264 stream).  We're
      * not recording audio.
      */
-    private void drainEncoder(boolean endOfStream) {
+    private void drainEncoder(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo, boolean endOfStream) {
         final int TIMEOUT_USEC = 10000;
         if (VERBOSE) Log.d(TAG, "drainEncoder(" + endOfStream + ")");
 
         ByteBuffer[] encoderOutputBuffers = mEncoder.getOutputBuffers();
         while (true) {
-            int encoderStatus = mEncoder.dequeueOutputBuffer(mBufferInfo, TIMEOUT_USEC);
+            int encoderStatus = encoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_USEC);
             if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
                 // no output available yet
                 if (!endOfStream) {
@@ -200,13 +203,13 @@ public class ChunkedAvcEncoder {
                 }
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
                 // not expected for an encoder
-                encoderOutputBuffers = mEncoder.getOutputBuffers();
+                encoderOutputBuffers = encoder.getOutputBuffers();
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 // should happen before receiving buffers, and should only happen once
                 if (mMuxerStarted) {
                     throw new RuntimeException("format changed twice");
                 }
-                MediaFormat newFormat = mEncoder.getOutputFormat();
+                MediaFormat newFormat = encoder.getOutputFormat();
                 Log.d(TAG, "encoder output format changed: " + newFormat);
 
                 // now that we have the Magic Goodies, start the muxer
@@ -224,29 +227,29 @@ public class ChunkedAvcEncoder {
                             " was null");
                 }
 
-                if ((mBufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+                if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
                     // The codec config data was pulled out and fed to the muxer when we got
                     // the INFO_OUTPUT_FORMAT_CHANGED status.  Ignore it.
                     if (VERBOSE) Log.d(TAG, "ignoring BUFFER_FLAG_CODEC_CONFIG");
-                    mBufferInfo.size = 0;
+                    bufferInfo.size = 0;
                 }
 
-                if (mBufferInfo.size != 0) {
+                if (bufferInfo.size != 0) {
                     if (!mMuxerStarted) {
                         throw new RuntimeException("muxer hasn't started");
                     }
 
                     // adjust the ByteBuffer values to match BufferInfo (not needed?)
-                    encodedData.position(mBufferInfo.offset);
-                    encodedData.limit(mBufferInfo.offset + mBufferInfo.size);
+                    encodedData.position(bufferInfo.offset);
+                    encodedData.limit(bufferInfo.offset + bufferInfo.size);
 
-                    mMuxer.writeSampleData(mTrackIndex, encodedData, mBufferInfo);
-                    if (VERBOSE) Log.d(TAG, "sent " + mBufferInfo.size + " bytes to muxer with pts " + mBufferInfo.presentationTimeUs);
+                    mMuxer.writeSampleData(mTrackIndex, encodedData, bufferInfo);
+                    if (VERBOSE) Log.d(TAG, "sent " + bufferInfo.size + " bytes to muxer with pts " + bufferInfo.presentationTimeUs);
                 }
 
-                mEncoder.releaseOutputBuffer(encoderStatus, false);
+                encoder.releaseOutputBuffer(encoderStatus, false);
 
-                if ((mBufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                     if (!endOfStream) {
                         Log.w(TAG, "reached end of stream unexpectedly");
                     } else {
