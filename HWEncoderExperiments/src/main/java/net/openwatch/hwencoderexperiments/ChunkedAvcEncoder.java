@@ -25,7 +25,7 @@ public class ChunkedAvcEncoder {
     MediaFormat mediaFormat;
     private MediaCodec mEncoder;
     private MediaMuxer mMuxer;
-    private int mTrackIndex;
+    private TrackIndex mTrackIndex = new TrackIndex();
     private boolean mMuxerStarted;
     // allocate one of these up front so we don't need to do it every time
     private MediaCodec.BufferInfo mBufferInfo;
@@ -42,10 +42,14 @@ public class ChunkedAvcEncoder {
     int framesPerChunk = 0;     // calculated
     int totalFrameCount = 0;
 
-
     Context c;
 
     private ExecutorService encodingService = Executors.newSingleThreadExecutor(); // re-use encodingService
+
+    // Can't pass an int by reference in Java...
+    class TrackIndex{
+        int index = 0;
+    }
 
     public ChunkedAvcEncoder(Context c) {
         this.c = c;
@@ -79,7 +83,7 @@ public class ChunkedAvcEncoder {
             throw new RuntimeException("MediaMuxer creation failed", ioe);
         }
 
-        mTrackIndex = -1;
+        mTrackIndex.index = -1;
         mMuxerStarted = false;
     }
 
@@ -97,18 +101,33 @@ public class ChunkedAvcEncoder {
         Log.i(TAG, "ChunkedAVEnc saw #frames: " + totalFrameCount);
     }
 
-    public void close() {
-        drainEncoder(mEncoder, mBufferInfo, true);
+    public void closeEncoderAndMuxer(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo) {
+        drainEncoder(encoder, bufferInfo, mTrackIndex, true);
         try {
-            mEncoder.stop();
-            mEncoder.release();
-            mEncoder = null;
-            mMuxer.stop();
-            mMuxer.release();
-            mMuxer = null;
+            encoder.stop();
+            encoder.release();
+            encoder = null;
+            closeMuxer();
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    public void closeEncoder(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo) {
+        drainEncoder(encoder, bufferInfo, mTrackIndex, true);
+        try {
+            encoder.stop();
+            encoder.release();
+            encoder = null;
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void closeMuxer(){
+        mMuxer.stop();
+        mMuxer.release();
+        mMuxer = null;
     }
 
     long lastFrameTime = -1;
@@ -145,7 +164,7 @@ public class ChunkedAvcEncoder {
         }
 
         // transfer previously encoded data to muxer
-        drainEncoder(mEncoder, mBufferInfo, false);
+        drainEncoder(mEncoder, mBufferInfo, mTrackIndex, false);
         // send current frame data to encoder
         try {
             ByteBuffer[] inputBuffers = mEncoder.getInputBuffers();
@@ -159,7 +178,7 @@ public class ChunkedAvcEncoder {
                 if(eosReceived){
                     Log.i(TAG, "EOS received in offerEncoder");
                     mEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, presentationTimeUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
-                    close();
+                    closeEncoderAndMuxer(mEncoder, mBufferInfo);
                     eosSentToEncoder = true;
                     if(!stopReceived){
                         // swap encoder
@@ -187,10 +206,9 @@ public class ChunkedAvcEncoder {
      * We're just using the muxer to get a .mp4 file (instead of a raw H.264 stream).  We're
      * not recording audio.
      */
-    private void drainEncoder(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo, boolean endOfStream) {
+    private void drainEncoder(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo, TrackIndex trackIndex, boolean endOfStream) {
         final int TIMEOUT_USEC = 10000;
         if (VERBOSE) Log.d(TAG, "drainEncoder(" + endOfStream + ")");
-
         ByteBuffer[] encoderOutputBuffers = mEncoder.getOutputBuffers();
         while (true) {
             int encoderStatus = encoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_USEC);
@@ -213,7 +231,7 @@ public class ChunkedAvcEncoder {
                 Log.d(TAG, "encoder output format changed: " + newFormat);
 
                 // now that we have the Magic Goodies, start the muxer
-                mTrackIndex = mMuxer.addTrack(newFormat);
+                trackIndex.index = mMuxer.addTrack(newFormat);
                 mMuxer.start();
                 mMuxerStarted = true;
             } else if (encoderStatus < 0) {
@@ -243,7 +261,7 @@ public class ChunkedAvcEncoder {
                     encodedData.position(bufferInfo.offset);
                     encodedData.limit(bufferInfo.offset + bufferInfo.size);
 
-                    mMuxer.writeSampleData(mTrackIndex, encodedData, bufferInfo);
+                    mMuxer.writeSampleData(trackIndex.index, encodedData, bufferInfo);
                     if (VERBOSE) Log.d(TAG, "sent " + bufferInfo.size + " bytes to muxer with pts " + bufferInfo.presentationTimeUs);
                 }
 
