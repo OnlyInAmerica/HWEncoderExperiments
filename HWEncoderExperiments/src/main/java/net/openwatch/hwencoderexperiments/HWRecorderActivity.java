@@ -71,9 +71,10 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
             mCamera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
                 @Override
                 public void onPreviewFrame(byte[] videoFrame, Camera camera) {
+                    if(!audioPoller.is_recording)
+                        return;
                     numFramesPreviewed++;
-                    //Log.i(TAG, "Inter-frame time: " + (System.currentTimeMillis() - lastFrameTime) + " ms");
-                    mEncoder.offerEncoder(videoFrame, audioPoller.emptyBuffer());
+                    mEncoder.offerEncoder(videoFrame, audioPoller.emptyBuffer(), System.nanoTime());
                     mCamera.addCallbackBuffer(videoFrame);
                     lastFrameTime = System.currentTimeMillis();
                     if(!recording){ // One frame must be sent with EOS flag after stop requested

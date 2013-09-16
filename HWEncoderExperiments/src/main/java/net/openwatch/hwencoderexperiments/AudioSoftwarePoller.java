@@ -83,7 +83,7 @@ public class AudioSoftwarePoller {
 		write_index = recorderTask.buffer_write_index;
 		
 		if(write_index == 0 || write_index < recorderTask.samples_per_frame){
-			if(VERBOSE) Log.i("AUDIO_READ_BUFFER", "Buffer empty or smaller than samples_per_frame");
+			if(VERBOSE) Log.i("AudioSoftwarePoller-ReadBuffer", "Buffer empty or smaller than samples_per_frame");
 			read_distance = 0;
 			return audio_samples; // if samples aren't ready, there's nothing to do
 		}
@@ -106,7 +106,7 @@ public class AudioSoftwarePoller {
 		}else
 			System.arraycopy(recorderTask.data_buffer, read_index, audio_samples, 0, read_distance);
 		
-		if (VERBOSE) Log.i("AUDIO_READ_BUFFER",String.valueOf(read_index) + " - " + String.valueOf(write_index-1) + " dist: "+ String.valueOf(read_distance));
+		if (VERBOSE) Log.i("AudioSoftwarePoller-ReadBuffer",String.valueOf(read_index) + " - " + String.valueOf(write_index-1) + " dist: "+ String.valueOf(read_distance));
 		
 		recorderTask.buffer_read_index = write_index;
 		recorderTask.total_frames_read += (distance / recorderTask.samples_per_frame);
@@ -117,7 +117,7 @@ public class AudioSoftwarePoller {
 	public class RecorderTask implements Runnable {
 		public int buffer_size;
 		
-		public int samples_per_frame = 1024; 	// codec-specific
+		public int samples_per_frame = 512; 	// codec-specific
 		public int buffer_write_index = 0; 		// last buffer index written to
 		public int buffer_read_index = 0; 		// first buffer index to read from
 		
@@ -146,13 +146,14 @@ public class AudioSoftwarePoller {
 					AUDIO_FORMAT, 	 					 // audio format
 					buffer_size);	 					 // buffer size (bytes)
 			
-			is_recording = true;
+
 			audio_recorder.startRecording();
-			Log.i("AUDIO_REC","SW recording begin");
+            is_recording = true;
+			Log.i("AudioSoftwarePoller","SW recording begin");
 			while (is_recording)
 	        {
 	            audio_recorder.read(data_buffer, buffer_write_index, samples_per_frame);
-	            if(VERBOSE) Log.i("AUDIO_FILL_BUFFER",String.valueOf(buffer_write_index) + " - " + String.valueOf(buffer_write_index + samples_per_frame-1));
+	            if(VERBOSE) Log.i("AudioSoftwarePoller-FillBuffer",String.valueOf(buffer_write_index) + " - " + String.valueOf(buffer_write_index + samples_per_frame-1));
 	            buffer_write_index = (buffer_write_index + samples_per_frame) % buffer_size;
 	            total_frames_written ++;
 
@@ -161,7 +162,7 @@ public class AudioSoftwarePoller {
 				audio_recorder.setRecordPositionUpdateListener(null);
 				audio_recorder.release();
 				audio_recorder = null;
-				Log.i("AUDIO_REC", "stopped");
+				Log.i("AudioSoftwarePoller", "stopped");
 			}			
 		} 
 	}
