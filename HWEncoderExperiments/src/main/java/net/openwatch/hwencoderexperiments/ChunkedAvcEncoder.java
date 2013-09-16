@@ -21,14 +21,19 @@ import java.util.concurrent.Executors;
 public class ChunkedAvcEncoder {
     private static final String TAG = "ChunkedAvcEncoder";
     private static final String VIDEO_MIME_TYPE = "video/avc";
+    private static final String AUDIO_MIME_TYPE = "audio/mp4a-latm";
     private static final boolean VERBOSE = false;
     MediaFormat videoFormat;
     private MediaCodec mVideoEncoder;
     private TrackIndex mVideoTrackIndex = new TrackIndex();
+    MediaFormat audioFormat;
+    private MediaCodec mAudioEncoder;
+    private TrackIndex mAudioTrackIndex = new TrackIndex();
     private MediaMuxer mMuxer;
     private boolean mMuxerStarted;
     // allocate one of these up front so we don't need to do it every time
     private MediaCodec.BufferInfo mVideoBufferInfo;
+    private MediaCodec.BufferInfo mAudioBufferInfo;
     boolean eosReceived = false;
     boolean eosSentToEncoder = false;
     boolean stopReceived = false;
@@ -76,6 +81,20 @@ public class ChunkedAvcEncoder {
         mVideoEncoder = MediaCodec.createEncoderByType(VIDEO_MIME_TYPE);
         mVideoEncoder.configure(videoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         mVideoEncoder.start();
+
+        mAudioBufferInfo = new MediaCodec.BufferInfo();
+
+        audioFormat = new MediaFormat();
+        audioFormat.setString(MediaFormat.KEY_MIME, AUDIO_MIME_TYPE);
+        audioFormat.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
+        audioFormat.setInteger(MediaFormat.KEY_SAMPLE_RATE, 44100);
+        audioFormat.setInteger(MediaFormat.KEY_CHANNEL_COUNT, 1);
+        audioFormat.setInteger(MediaFormat.KEY_BIT_RATE, 96000);
+        audioFormat.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 13312);
+
+        mAudioEncoder = MediaCodec.createEncoderByType(AUDIO_MIME_TYPE);
+        mAudioEncoder.configure(audioFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+        mAudioEncoder.start();
 
         try {
             mMuxer = new MediaMuxer(f.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
