@@ -22,7 +22,7 @@ public class ChunkedAvcEncoder {
     private static final String TAG = "ChunkedAvcEncoder";
     private static final String VIDEO_MIME_TYPE = "video/avc";
     private static final String AUDIO_MIME_TYPE = "audio/mp4a-latm";
-    private static final boolean VERBOSE = false;
+    private static final boolean VERBOSE = true;
     MediaFormat videoFormat;
     private MediaCodec mVideoEncoder;
     private TrackIndex mVideoTrackIndex = new TrackIndex();
@@ -35,7 +35,8 @@ public class ChunkedAvcEncoder {
     private MediaCodec.BufferInfo mVideoBufferInfo;
     private MediaCodec.BufferInfo mAudioBufferInfo;
     boolean eosReceived = false;
-    boolean eosSentToEncoder = false;
+    boolean eosSentToVideoEncoder = false;
+    boolean eosSentToAudioEncoder = false;
     boolean stopReceived = false;
     long startTime = 0;
 
@@ -64,7 +65,8 @@ public class ChunkedAvcEncoder {
     private void prepare(){
         frameCount = 0;
         eosReceived = false;
-        eosSentToEncoder = false;
+        eosSentToVideoEncoder = false;
+        eosSentToAudioEncoder = false;
         framesPerChunk = CHUNK_DURATION_SEC * FRAMES_PER_SECOND;
         File f = FileUtils.createTempFileInRootAppStorage(c, "test_" + currentChunk + ".mp4");
 
@@ -102,6 +104,7 @@ public class ChunkedAvcEncoder {
             throw new RuntimeException("MediaMuxer creation failed", ioe);
         }
 
+        mAudioTrackIndex.index = -1;
         mVideoTrackIndex.index = -1;
         mMuxerStarted = false;
     }
@@ -120,8 +123,8 @@ public class ChunkedAvcEncoder {
         Log.i(TAG, "ChunkedAVEnc saw #frames: " + totalFrameCount);
     }
 
-    public void closeEncoderAndMuxer(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo) {
-        drainEncoder(encoder, bufferInfo, mVideoTrackIndex, true);
+    public void closeEncoderAndMuxer(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo, TrackIndex trackIndex) {
+        drainEncoder(encoder, bufferInfo, trackIndex, true);
         try {
             encoder.stop();
             encoder.release();
@@ -132,8 +135,8 @@ public class ChunkedAvcEncoder {
         }
     }
 
-    public void closeEncoder(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo) {
-        drainEncoder(encoder, bufferInfo, mVideoTrackIndex, true);
+    public void closeEncoder(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo, TrackIndex trackIndex) {
+        drainEncoder(encoder, bufferInfo, trackIndex, true);
         try {
             encoder.stop();
             encoder.release();
@@ -154,7 +157,7 @@ public class ChunkedAvcEncoder {
      * External method called by CameraPreviewCallback or similar
      * @param input
      */
-    public void offerEncoder(byte[] input){
+    public void offerVideoEncoder(byte[] input){
         if(!encodingService.isShutdown()){
             long thisFrameTime = System.nanoTime();
             encodingService.submit(new EncoderTask(this, input, null, thisFrameTime));
@@ -167,10 +170,10 @@ public class ChunkedAvcEncoder {
      * Internal method called by encodingService
      * @param input
      */
-    private void _offerEncoder(byte[] input, long presentationTimeNs) {
+    private void _offerVideoEncoder(byte[] input, long presentationTimeNs) {
         if(frameCount == 0)
             startTime = presentationTimeNs;
-        if(eosSentToEncoder && stopReceived){
+        if(eosSentToVideoEncoder && stopReceived){
             return;
         }
 
@@ -197,8 +200,69 @@ public class ChunkedAvcEncoder {
                 if(eosReceived){
                     Log.i(TAG, "EOS received in offerEncoder");
                     mVideoEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, presentationTimeUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
-                    closeEncoderAndMuxer(mVideoEncoder, mVideoBufferInfo);
-                    eosSentToEncoder = true;
+                    closeEncoder(mVideoEncoder, mVideoBufferInfo, mVideoTrackIndex);
+                    eosSentToVideoEncoder = true;
+                }else
+                    mVideoEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, presentationTimeUs, 0);
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "_offerVideoEncoder exception");
+            t.printStackTrace();
+        }
+    }
+
+    /**
+     * temp restriction: Always call after offerVideoEncoder
+     * @param input
+     */
+    public void offerAudioEncoder(byte[] input){
+        if(!encodingService.isShutdown()){
+            long thisFrameTime = System.nanoTime();
+            encodingService.submit(new EncoderTask(this, null, input, thisFrameTime));
+            lastFrameTime = System.nanoTime();
+        }
+
+    }
+
+    /**
+     * temp restriction: Always call after _offerVideoEncoder
+     * @param input
+     * @param presentationTimeNs
+     */
+    private void _offerAudioEncoder(byte[] input, long presentationTimeNs) {
+        if(eosSentToAudioEncoder && stopReceived || input == null){
+            if(eosReceived){
+                Log.i(TAG, "EOS received in offerAudioEncoder");
+                closeEncoderAndMuxer(mAudioEncoder, mAudioBufferInfo, mAudioTrackIndex); // always called after video, so safe to close muxer
+                eosSentToAudioEncoder = true;
+                if(!stopReceived){
+                    // swap encoder
+                    currentChunk++;
+                    prepare();
+                }else{
+                    Log.i(TAG, "Stopping Encoding Service");
+                    encodingService.shutdown();
+                }
+            }
+            return;
+        }
+        // transfer previously encoded data to muxer
+        drainEncoder(mAudioEncoder, mAudioBufferInfo, mAudioTrackIndex, false);
+        // send current frame data to encoder
+        try {
+            ByteBuffer[] inputBuffers = mAudioEncoder.getInputBuffers();
+            int inputBufferIndex = mAudioEncoder.dequeueInputBuffer(-1);
+            if (inputBufferIndex >= 0) {
+                ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
+                inputBuffer.clear();
+                inputBuffer.put(input);
+                //long presentationTimeUs = (presentationTimeNs - startTime) / 1000;
+                //Log.i(TAG, "Attempt to set PTS: " + presentationTimeUs);
+                if(eosReceived){
+                    Log.i(TAG, "EOS received in offerEncoder");
+                    mAudioEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                    closeEncoderAndMuxer(mAudioEncoder, mAudioBufferInfo, mAudioTrackIndex); // always called after video, so safe to close muxer
+                    eosSentToAudioEncoder = true;
                     if(!stopReceived){
                         // swap encoder
                         currentChunk++;
@@ -208,9 +272,10 @@ public class ChunkedAvcEncoder {
                         encodingService.shutdown();
                     }
                 }else
-                    mVideoEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, presentationTimeUs, 0);
+                    mAudioEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, 0, 0);
             }
         } catch (Throwable t) {
+            Log.e(TAG, "_offerAudioEncoder exception");
             t.printStackTrace();
         }
     }
@@ -281,7 +346,7 @@ public class ChunkedAvcEncoder {
                     encodedData.limit(bufferInfo.offset + bufferInfo.size);
 
                     mMuxer.writeSampleData(trackIndex.index, encodedData, bufferInfo);
-                    if (VERBOSE) Log.d(TAG, "sent " + bufferInfo.size + " bytes to muxer with pts " + bufferInfo.presentationTimeUs);
+                    if (VERBOSE) Log.d(TAG, "sent " + bufferInfo.size + ((encoder == mVideoEncoder) ? " video " : " audio") + " bytes to muxer with pts " + bufferInfo.presentationTimeUs);
                 }
 
                 encoder.releaseOutputBuffer(encoderStatus, false);
@@ -312,7 +377,7 @@ public class ChunkedAvcEncoder {
 
         // vars for type ENCODE_FRAME
         private byte[] video_data;
-        private short[] audio_data;
+        private byte[] audio_data;
         long presentationTimeNs;
 
         public EncoderTask(ChunkedAvcEncoder encoder, EncoderTaskType type){
@@ -330,7 +395,7 @@ public class ChunkedAvcEncoder {
             }
         }
 
-        public EncoderTask(ChunkedAvcEncoder encoder, byte[] video_data, short[] audio_data, long pts){
+        public EncoderTask(ChunkedAvcEncoder encoder, byte[] video_data, byte[] audio_data, long pts){
             setEncoder(encoder);
             setEncodeFrameParams(video_data, audio_data, pts);
         }
@@ -348,7 +413,7 @@ public class ChunkedAvcEncoder {
             is_initialized = true;
         }
 
-        private void setEncodeFrameParams(byte[] video_data, short[] audio_data, long pts){
+        private void setEncodeFrameParams(byte[] video_data, byte[] audio_data, long pts){
             this.video_data = video_data;
             this.audio_data = audio_data;
             this.presentationTimeNs = pts;
@@ -366,10 +431,9 @@ public class ChunkedAvcEncoder {
 
         private void encodeFrame(){
             if(encoder != null && video_data != null)
-                encoder._offerEncoder(video_data, presentationTimeNs);
-        }
-
-        private void shiftEncoder(){
+                encoder._offerVideoEncoder(video_data, presentationTimeNs);
+            else if(encoder != null && audio_data != null)
+                encoder._offerAudioEncoder(audio_data, presentationTimeNs);
         }
 
         private void finalizeEncoder(){

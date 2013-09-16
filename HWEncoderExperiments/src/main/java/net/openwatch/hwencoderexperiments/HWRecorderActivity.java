@@ -3,8 +3,6 @@ package net.openwatch.hwencoderexperiments;
 import android.app.Activity;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
-import android.media.MediaCodecInfo;
-import android.media.MediaCodecList;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.TextureView;
@@ -21,6 +19,8 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
     boolean recording = false;
     int bufferSize = 460800;
     int numFramesPreviewed = 0;
+
+    AudioSoftwarePoller audioPoller;
 
     // testing
     long lastFrameTime = 0;
@@ -54,8 +54,11 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
         Log.i(TAG, "Record button hit. Start: " + String.valueOf(recording));
 
         if(recording){
-            mEncoder = new ChunkedAvcEncoder(getApplicationContext());
+            audioPoller = new AudioSoftwarePoller();
+            audioPoller.startPolling();
 
+            mEncoder = new ChunkedAvcEncoder(getApplicationContext());
+            final byte[] dummyAudio = new byte[343];
             mCamera.addCallbackBuffer(new byte[bufferSize]);
             mCamera.addCallbackBuffer(new byte[bufferSize]);
             mCamera.addCallbackBuffer(new byte[bufferSize]);
@@ -65,13 +68,18 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
             mCamera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
                 @Override
                 public void onPreviewFrame(byte[] data, Camera camera) {
+                    if(!audioPoller.is_recording)
+                        return;
                     numFramesPreviewed++;
                     //Log.i(TAG, "Inter-frame time: " + (System.currentTimeMillis() - lastFrameTime) + " ms");
-                    mEncoder.offerEncoder(data);
+                    mEncoder.offerVideoEncoder(data);
+                    //mEncoder.offerAudioEncoder(audioPoller.emptyBuffer());
+                    mEncoder.offerAudioEncoder(dummyAudio);
                     mCamera.addCallbackBuffer(data);
                     lastFrameTime = System.currentTimeMillis();
                     if(!recording){ // One frame must be sent with EOS flag after stop requested
                         camera.setPreviewCallbackWithBuffer(null);
+                        audioPoller.stopPolling();
                     }
                 }
             });
