@@ -12,8 +12,10 @@ import java.util.LinkedList;
 import java.util.List;
 
 // Bare minimum example of encoding zeroed byte[]s to AAC audio within an .mp4 file
-// I seem to be mishandling the (BufferInfo) info object, as it somehow produces non-monotonically increasing pts values...
-// Though this example provides 0 for the pts value on every call to codec.queueInputBuffer
+// The trick here is that you have to manually maintain the BufferInfo.presentationTimeStampUs
+// value between MediaCodec.dequeueOutputBuffer(...) and MediaMuxer.writeSampleData()
+// due to the codec sometimes adding to the presentationTimeStampUs given in MediaCodec.queueInputBuffer(...)
+
 // 23200-23481/net.openwatch.hwencoderexperiments E/MPEG4Writer﹕ timestampUs 0 < lastTimestampUs 23219 for Audio track
 
 // Adapted from the related Android Framework example:
@@ -21,12 +23,15 @@ import java.util.List;
 
 public class AudioEncodingTest {
     private static final String TAG = "EncoderTest";
+    private static final String BUFFER_TAG = "ByteBuffer";
     private static final boolean VERBOSE = true;
 
     private static final int kNumInputBytes = 256 * 1024;
     private static final long kTimeoutUs = 10000;
 
     private static MediaMuxer mMediaMuxer;
+    private static long lastQueuedPresentationTimeStampUs = 0;
+    private static long lastDequeuedPresentationTimeStampUs = 0;
 
     public static void testAACEncoders(Context c) {
         LinkedList<MediaFormat> formats = new LinkedList<MediaFormat>();
@@ -43,7 +48,7 @@ public class AudioEncodingTest {
                     continue;
                 }
                 for (int j = 0; j < kBitRates.length; ++j) {
-                    for (int ch = 1; ch <= 2; ++ch) {
+                    for (int ch = 1; ch <= 1; ++ch) {
                         MediaFormat format  = new MediaFormat();
                         format.setString(MediaFormat.KEY_MIME, "audio/mp4a-latm");
 
@@ -120,9 +125,23 @@ public class AudioEncodingTest {
         byte[] zeroes = new byte[size];
         buffer.put(zeroes);
 
-        codec.queueInputBuffer(index, 0 /* offset */, size, 0 /* timeUs */, 0);
+        lastQueuedPresentationTimeStampUs = getNextQueuedPresentationTimeStampUs();
+        if (VERBOSE) Log.i(BUFFER_TAG, "queueInputBuffer " + size + " bytes of input with pts: " + lastQueuedPresentationTimeStampUs);
+        codec.queueInputBuffer(index, 0 /* offset */, size, lastQueuedPresentationTimeStampUs /* timeUs */, 0);
 
         return size;
+    }
+
+    private static long getNextQueuedPresentationTimeStampUs(){
+        long nextQueuedPresentationTimeStampUs = (lastQueuedPresentationTimeStampUs > lastDequeuedPresentationTimeStampUs) ? (lastQueuedPresentationTimeStampUs + 1) : (lastDequeuedPresentationTimeStampUs + 1);
+        Log.i(TAG, "nextQueuedPresentationTimeStampUs: " + nextQueuedPresentationTimeStampUs);
+        return nextQueuedPresentationTimeStampUs;
+    }
+
+    private static long getNextDeQueuedPresentationTimeStampUs(){
+        Log.i(TAG, "nextDequeuedPresentationTimeStampUs: " + (lastDequeuedPresentationTimeStampUs + 1));
+        lastDequeuedPresentationTimeStampUs ++;
+        return lastDequeuedPresentationTimeStampUs;
     }
 
     private static void dequeueOutputBuffer(
@@ -171,12 +190,13 @@ public class AudioEncodingTest {
 
                 if (index != MediaCodec.INFO_TRY_AGAIN_LATER) {
                     if (numBytesSubmitted >= kNumInputBytes) {
-                        Log.i(TAG, "queueing EOS to inputBuffer");
+                        lastQueuedPresentationTimeStampUs = getNextQueuedPresentationTimeStampUs();
+                        Log.i(BUFFER_TAG, "queueInputBuffer EOS pts: " + lastQueuedPresentationTimeStampUs);
                         codec.queueInputBuffer(
                                 index,
                                 0 /* offset */,
                                 0 /* size */,
-                                0 /* timeUs */,
+                                lastQueuedPresentationTimeStampUs /* timeUs */,
                                 MediaCodec.BUFFER_FLAG_END_OF_STREAM);
 
                         if (VERBOSE) {
@@ -184,21 +204,19 @@ public class AudioEncodingTest {
                         }
 
                         doneSubmittingInput = true;
-                    } else {
+                    } else if(!doneSubmittingInput) {
                         int size = queueInputBuffer(
                                 codec, codecInputBuffers, index);
 
                         numBytesSubmitted += size;
-
-                        if (VERBOSE) {
-                            Log.d(TAG, "queued " + size + " bytes of input data.");
-                        }
                     }
                 }
             }
 
             MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
             index = codec.dequeueOutputBuffer(info, kTimeoutUs /* timeoutUs */);
+            //if (VERBOSE) Log.d(TAG, "dequeueOutputBuffer BufferInfo. size: " + info.size + " pts: " + info.presentationTimeUs + " offset: " + info.offset + " flags: " + info.flags + " index: " + index);
+            if (VERBOSE) Log.d(BUFFER_TAG, "dequeueOutputBuffer BufferInfo. pts: " + info.presentationTimeUs + " flags: " + info.flags);
 
             if (index == MediaCodec.INFO_TRY_AGAIN_LATER) {
             } else if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
@@ -208,7 +226,7 @@ public class AudioEncodingTest {
                 mMuxerStarted = true;
             } else if (index == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
                 codecOutputBuffers = codec.getOutputBuffers();
-            } else {
+            } else if (index >= 0){
                 // Write to muxer
                 //dequeueOutputBuffer(codec, codecOutputBuffers, index, info);
 
@@ -234,8 +252,10 @@ public class AudioEncodingTest {
                     encodedData.position(info.offset);
                     encodedData.limit(info.offset + info.size);
 
+                    if (VERBOSE) Log.d(TAG, "sending " + info.size + " audio bytes to muxer with pts " + info.presentationTimeUs + " offset: " + info.offset + " flags: " + info.flags);
+                    info.presentationTimeUs = getNextDeQueuedPresentationTimeStampUs();
                     mMediaMuxer.writeSampleData(trackIndex, encodedData, info);
-                    if (VERBOSE) Log.d(TAG, "sent " + info.size + " audio bytes to muxer with pts " + info.presentationTimeUs);
+                    lastDequeuedPresentationTimeStampUs = info.presentationTimeUs;
                 }
 
                 codec.releaseOutputBuffer(index, false);

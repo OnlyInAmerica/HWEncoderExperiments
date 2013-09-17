@@ -5,11 +5,12 @@
                 android:gravity="center"
                 tools:context=".MainActivity">
 
-    <TextureView
-            android:id="@+id/cameraPreview"
-            android:layout_width="fill_parent"
-            android:layout_height="fill_parent"
+    <Button
+            android:id="@+id/testButton"
+            android:layout_width="250dp"
+            android:layout_height="150dp"
             android:clickable="true"
+            android:text="Run Audio Test"
             android:onClick="onRecordButtonClick"/>
 
 </RelativeLayout>
