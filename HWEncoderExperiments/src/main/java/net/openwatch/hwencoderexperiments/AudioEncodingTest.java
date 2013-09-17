@@ -11,6 +11,14 @@ import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
 
+// Bare minimum example of encoding zeroed byte[]s to AAC audio within an .mp4 file
+// This inevitably returns:
+// 23200-23481/net.openwatch.hwencoderexperiments E/MPEG4Writer﹕ timestampUs 0 < lastTimestampUs 23219 for Audio track
+// Even if I try to provide a monotonically increasing presentation timestamp in calls to
+
+// adapted from:
+// https://android.googlesource.com/platform/cts/+/jb-mr2-release/tests/tests/media/src/android/media/cts/EncoderTest.java
+
 public class AudioEncodingTest {
     private static final String TAG = "EncoderTest";
     private static final boolean VERBOSE = true;
@@ -23,7 +31,7 @@ public class AudioEncodingTest {
     public static void testAACEncoders(Context c) {
         LinkedList<MediaFormat> formats = new LinkedList<MediaFormat>();
 
-        final int kAACProfiles[] = {2};
+        final int kAACProfiles[] = {MediaCodecInfo.CodecProfileLevel.AACObjectLC};
 
         final int kSampleRates[] = { /*8000, 11025, 22050, */ 44100 /*, 48000 */ };
         final int kBitRates[] = { /* 64000,*/ 128000 };
