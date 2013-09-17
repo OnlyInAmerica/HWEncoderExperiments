@@ -52,7 +52,8 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
     public void onRecordButtonClick(View v){
         recording = !recording;
         Log.i(TAG, "Record button hit. Start: " + String.valueOf(recording));
-
+        AudioEncodingTest.testAACEncoders(getApplicationContext());
+        /*
         if(recording){
             audioPoller = new AudioSoftwarePoller();
             audioPoller.startPolling();
@@ -91,6 +92,7 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
             Log.i(TAG, "HWRecorderActivity saw #frames: " + numFramesPreviewed);
 
         }
+        */
     }
 
     @Override

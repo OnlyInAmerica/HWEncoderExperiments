@@ -293,7 +293,7 @@ public class ChunkedAvcEncoder {
     private void drainEncoder(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo, TrackIndex trackIndex, boolean endOfStream) {
         final int TIMEOUT_USEC = 10000;
         if (VERBOSE) Log.d(TAG, "drainEncoder(" + endOfStream + ")");
-        ByteBuffer[] encoderOutputBuffers = mVideoEncoder.getOutputBuffers();
+        ByteBuffer[] encoderOutputBuffers = encoder.getOutputBuffers();
         while (true) {
             int encoderStatus = encoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_USEC);
             if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
