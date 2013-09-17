@@ -33,8 +33,10 @@ public class AudioEncodingTest {
     private static final long kTimeoutUs = 10000;
 
     private static MediaMuxer mMuxer;
-    private static int trackIndex = -1;
+    private static int trackIndex = 0;
     private static boolean mMuxerStarted;
+
+    private static final String AUDIO_MIME_TYPE = "audio/mp4a-latm";
 
     public void testAMRNBEncoders(Context c) {
         LinkedList<MediaFormat> formats = new LinkedList<MediaFormat>();
@@ -81,6 +83,7 @@ public class AudioEncodingTest {
                 39 /* OMX_AUDIO_AACObjectELD */
         };
 
+        /*
         final int kSampleRates[] = {8000, 11025, 22050, 44100, 48000};
         final int kBitRates[] = {64000, 128000};
 
@@ -108,8 +111,18 @@ public class AudioEncodingTest {
                 }
             }
         }
-
         testEncoderWithFormats(c, "audio/mp4a-latm", formats);
+        */
+
+        MediaFormat audioFormat = new MediaFormat();
+        audioFormat.setString(MediaFormat.KEY_MIME,  AUDIO_MIME_TYPE);
+        audioFormat.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
+        audioFormat.setInteger(MediaFormat.KEY_SAMPLE_RATE, 44100);
+        audioFormat.setInteger(MediaFormat.KEY_CHANNEL_COUNT, 1);
+        audioFormat.setInteger(MediaFormat.KEY_BIT_RATE, 96000);
+        audioFormat.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 13312);
+
+        testEncoder(c, "", audioFormat);
     }
 
     private static void testEncoderWithFormats(Context c,
@@ -246,7 +259,8 @@ public class AudioEncodingTest {
     }
 
     private static void testEncoder(Context c, String componentName, MediaFormat format) {
-        MediaCodec codec = MediaCodec.createByCodecName(componentName);
+        List<String> componentNames = getEncoderNamesForType(AUDIO_MIME_TYPE);
+        MediaCodec codec = MediaCodec.createByCodecName(componentNames.get(0));
 
         try {
             codec.configure(
@@ -270,6 +284,7 @@ public class AudioEncodingTest {
         codec.start();
         ByteBuffer[] codecInputBuffers = codec.getInputBuffers();
         ByteBuffer[] codecOutputBuffers = codec.getOutputBuffers();
+        MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
 
         int numBytesSubmitted = 0;
         boolean doneSubmittingInput = false;
@@ -280,7 +295,7 @@ public class AudioEncodingTest {
 
             if (!doneSubmittingInput) {
                 index = codec.dequeueInputBuffer(kTimeoutUs /* timeoutUs */);
-
+                drainEncoder(codec, info, trackIndex, false);
                 if (index != MediaCodec.INFO_TRY_AGAIN_LATER) {
                     if (numBytesSubmitted >= kNumInputBytes) {
                         codec.queueInputBuffer(
@@ -306,11 +321,10 @@ public class AudioEncodingTest {
                         }
                     }
                 }
-            }
-
-            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
-            index = codec.dequeueOutputBuffer(info, kTimeoutUs /* timeoutUs */);
-
+            }else
+                break;
+            //index = codec.dequeueOutputBuffer(info, kTimeoutUs /* timeoutUs */);
+            /*
             if (index == MediaCodec.INFO_TRY_AGAIN_LATER) {
             } else if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 MediaFormat newFormat = codec.getOutputFormat();
@@ -336,8 +350,11 @@ public class AudioEncodingTest {
                     Log.d(TAG, "dequeued " + info.size + " bytes of output data.");
                 }
             }
-        }
+            */
+        } // end while
 
+        drainEncoder(codec, info, trackIndex, true);
+        /*
         if (VERBOSE) {
             Log.d(TAG, "queued a total of " + numBytesSubmitted + "bytes, "
                     + "dequeued " + numBytesDequeued + " bytes.");
@@ -355,14 +372,14 @@ public class AudioEncodingTest {
             Log.w(TAG, "desiredRatio = " + desiredRatio
                     + ", actualRatio = " + actualRatio);
         }
-
+        */
         codec.release();
         codec = null;
         mMuxer.stop();
         mMuxer.release();
     }
 
-    private void drainEncoder(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo, int trackIndex, boolean endOfStream) {
+    private static void drainEncoder(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo, int trackIndex, boolean endOfStream) {
         final int TIMEOUT_USEC = 10000;
         if (VERBOSE) Log.d(TAG, "drainEncoder(" + endOfStream + ")");
         ByteBuffer[] encoderOutputBuffers = encoder.getOutputBuffers();
@@ -387,7 +404,7 @@ public class AudioEncodingTest {
                 Log.d(TAG, "encoder output format changed: " + newFormat);
 
                 // now that we have the Magic Goodies, start the muxer
-                trackIndex.index = mMuxer.addTrack(newFormat);
+                trackIndex = mMuxer.addTrack(newFormat);
                 mMuxer.start();
                 mMuxerStarted = true;
             } else if (encoderStatus < 0) {
