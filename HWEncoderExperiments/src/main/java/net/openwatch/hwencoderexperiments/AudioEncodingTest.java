@@ -12,11 +12,11 @@ import java.util.LinkedList;
 import java.util.List;
 
 // Bare minimum example of encoding zeroed byte[]s to AAC audio within an .mp4 file
-// This inevitably returns:
+// I seem to be mishandling the (BufferInfo) info object, as it somehow produces non-monotonically increasing pts values...
+// Though this example provides 0 for the pts value on every call to codec.queueInputBuffer
 // 23200-23481/net.openwatch.hwencoderexperiments E/MPEG4Writer﹕ timestampUs 0 < lastTimestampUs 23219 for Audio track
-// Even if I try to provide a monotonically increasing presentation timestamp in calls to
 
-// adapted from:
+// Adapted from the related Android Framework example:
 // https://android.googlesource.com/platform/cts/+/jb-mr2-release/tests/tests/media/src/android/media/cts/EncoderTest.java
 
 public class AudioEncodingTest {
