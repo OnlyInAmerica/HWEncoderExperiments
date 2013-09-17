@@ -31,7 +31,6 @@ public class ChunkedAvcEncoder {
     private TrackIndex mAudioTrackIndex = new TrackIndex();
     private MediaMuxer mMuxer;
     private boolean mMuxerStarted;
-    // allocate one of these up front so we don't need to do it every time
     private MediaCodec.BufferInfo mVideoBufferInfo;
     private MediaCodec.BufferInfo mAudioBufferInfo;
     boolean eosReceived = false;
@@ -91,7 +90,7 @@ public class ChunkedAvcEncoder {
         audioFormat.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
         audioFormat.setInteger(MediaFormat.KEY_SAMPLE_RATE, 44100);
         audioFormat.setInteger(MediaFormat.KEY_CHANNEL_COUNT, 1);
-        audioFormat.setInteger(MediaFormat.KEY_BIT_RATE, 96000);
+        audioFormat.setInteger(MediaFormat.KEY_BIT_RATE, 128000);
         audioFormat.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 13312);
 
         mAudioEncoder = MediaCodec.createEncoderByType(AUDIO_MIME_TYPE);
@@ -100,13 +99,14 @@ public class ChunkedAvcEncoder {
 
         try {
             mMuxer = new MediaMuxer(f.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+            mVideoTrackIndex.index = mMuxer.addTrack(videoFormat);
+            mAudioTrackIndex.index = mMuxer.addTrack(audioFormat);
+            Log.i(TAG, "Added tracks. Video: " + mVideoTrackIndex.index + " Audio: " + mAudioTrackIndex.index);
+            mMuxer.start();
+            mMuxerStarted = true;
         } catch (IOException ioe) {
             throw new RuntimeException("MediaMuxer creation failed", ioe);
         }
-
-        mAudioTrackIndex.index = -1;
-        mVideoTrackIndex.index = -1;
-        mMuxerStarted = false;
     }
 
     public void stop(){
@@ -293,7 +293,7 @@ public class ChunkedAvcEncoder {
     private void drainEncoder(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo, TrackIndex trackIndex, boolean endOfStream) {
         final int TIMEOUT_USEC = 10000;
         if (VERBOSE) Log.d(TAG, "drainEncoder(" + endOfStream + ")");
-        ByteBuffer[] encoderOutputBuffers = mVideoEncoder.getOutputBuffers();
+        ByteBuffer[] encoderOutputBuffers = encoder.getOutputBuffers();
         while (true) {
             int encoderStatus = encoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_USEC);
             if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
@@ -308,16 +308,21 @@ public class ChunkedAvcEncoder {
                 encoderOutputBuffers = encoder.getOutputBuffers();
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 // should happen before receiving buffers, and should only happen once
+                /*
                 if (mMuxerStarted) {
                     throw new RuntimeException("format changed twice");
                 }
                 MediaFormat newFormat = encoder.getOutputFormat();
-                Log.d(TAG, "encoder output format changed: " + newFormat);
 
                 // now that we have the Magic Goodies, start the muxer
                 trackIndex.index = mMuxer.addTrack(newFormat);
-                mMuxer.start();
-                mMuxerStarted = true;
+                numTracksAdded ++;
+                Log.d(TAG, "encoder output format changed: " + newFormat +". Added track index: " + trackIndex.index);
+                if(numTracksAdded == TOTAL_NUM_TRACKS){
+                    mMuxer.start();
+                    mMuxerStarted = true;
+                }
+                */
             } else if (encoderStatus < 0) {
                 Log.w(TAG, "unexpected result from encoder.dequeueOutputBuffer: " +
                         encoderStatus);
