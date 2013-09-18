@@ -47,6 +47,10 @@ public class ChunkedAvcEncoder {
     int framesPerChunk = 0;     // calculated
     int totalFrameCount = 0;
 
+    // Audio state
+    private static long lastQueuedAudioPresentationTimeStampUs = 0;
+    private static long lastDequeuedAudioPresentationTimeStampUs = 0;
+
     Context c;
 
     private ExecutorService encodingService = Executors.newSingleThreadExecutor(); // re-use encodingService
@@ -66,6 +70,8 @@ public class ChunkedAvcEncoder {
         eosReceived = false;
         eosSentToVideoEncoder = false;
         eosSentToAudioEncoder = false;
+        lastQueuedAudioPresentationTimeStampUs = 0;
+        lastDequeuedAudioPresentationTimeStampUs = 0;
         framesPerChunk = CHUNK_DURATION_SEC * FRAMES_PER_SECOND;
         File f = FileUtils.createTempFileInRootAppStorage(c, "test_" + currentChunk + ".mp4");
 
@@ -256,11 +262,10 @@ public class ChunkedAvcEncoder {
                 ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
                 inputBuffer.clear();
                 inputBuffer.put(input);
-                //long presentationTimeUs = (presentationTimeNs - startTime) / 1000;
-                //Log.i(TAG, "Attempt to set PTS: " + presentationTimeUs);
+                lastQueuedAudioPresentationTimeStampUs = getNextAudioQueuedPresentationTimeStampUs();
                 if(eosReceived){
                     Log.i(TAG, "EOS received in offerEncoder");
-                    mAudioEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                    mAudioEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, lastQueuedAudioPresentationTimeStampUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
                     closeEncoderAndMuxer(mAudioEncoder, mAudioBufferInfo, mAudioTrackIndex); // always called after video, so safe to close muxer
                     eosSentToAudioEncoder = true;
                     if(!stopReceived){
@@ -272,7 +277,7 @@ public class ChunkedAvcEncoder {
                         encodingService.shutdown();
                     }
                 }else
-                    mAudioEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, 0, 0);
+                    mAudioEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, lastQueuedAudioPresentationTimeStampUs, 0);
             }
         } catch (Throwable t) {
             Log.e(TAG, "_offerAudioEncoder exception");
@@ -349,8 +354,9 @@ public class ChunkedAvcEncoder {
                     // adjust the ByteBuffer values to match BufferInfo (not needed?)
                     encodedData.position(bufferInfo.offset);
                     encodedData.limit(bufferInfo.offset + bufferInfo.size);
-
+                    if (encoder == mAudioEncoder) bufferInfo.presentationTimeUs = getNextAudioDeQueuedPresentationTimeStampUs();
                     mMuxer.writeSampleData(trackIndex.index, encodedData, bufferInfo);
+                    if (encoder == mAudioEncoder) lastDequeuedAudioPresentationTimeStampUs = bufferInfo.presentationTimeUs;
                     if (VERBOSE) Log.d(TAG, "sent " + bufferInfo.size + ((encoder == mVideoEncoder) ? " video " : " audio") + " bytes to muxer with pts " + bufferInfo.presentationTimeUs);
                 }
 
@@ -366,6 +372,18 @@ public class ChunkedAvcEncoder {
                 }
             }
         }
+    }
+
+    private static long getNextAudioQueuedPresentationTimeStampUs(){
+        long nextQueuedPresentationTimeStampUs = (lastQueuedAudioPresentationTimeStampUs > lastDequeuedAudioPresentationTimeStampUs) ? (lastQueuedAudioPresentationTimeStampUs + 1) : (lastDequeuedAudioPresentationTimeStampUs + 1);
+        Log.i(TAG, "nextQueuedPresentationTimeStampUs: " + nextQueuedPresentationTimeStampUs);
+        return nextQueuedPresentationTimeStampUs;
+    }
+
+    private static long getNextAudioDeQueuedPresentationTimeStampUs(){
+        Log.i(TAG, "nextDequeuedPresentationTimeStampUs: " + (lastDequeuedAudioPresentationTimeStampUs + 1));
+        lastDequeuedAudioPresentationTimeStampUs++;
+        return lastDequeuedAudioPresentationTimeStampUs;
     }
 
     enum EncoderTaskType{
