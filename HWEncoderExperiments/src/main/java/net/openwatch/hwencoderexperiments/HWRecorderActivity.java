@@ -1,17 +1,11 @@
 package net.openwatch.hwencoderexperiments;
 
 import android.app.Activity;
-import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.os.Bundle;
-import android.util.Log;
-import android.view.TextureView;
 import android.view.View;
 
-import java.io.IOException;
-import java.util.List;
-
-public class HWRecorderActivity extends Activity implements TextureView.SurfaceTextureListener{
+public class HWRecorderActivity extends Activity /*implements TextureView.SurfaceTextureListener */{
     private static final String TAG = "CameraToMpegTest";
 
     Camera mCamera;
@@ -20,16 +14,14 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
     int bufferSize = 460800;
     int numFramesPreviewed = 0;
 
-    AudioSoftwarePoller audioPoller;
-
     // testing
     long lastFrameTime = 0;
 
     protected void onCreate (Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_camera_to_mpeg_test);
-        TextureView tv = (TextureView) findViewById(R.id.cameraPreview);
-        tv.setSurfaceTextureListener(this);
+        //TextureView tv = (TextureView) findViewById(R.id.cameraPreview);
+        //tv.setSurfaceTextureListener(this);
 
         // testing
         /*
@@ -51,6 +43,10 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
 
     public void onRecordButtonClick(View v){
         recording = !recording;
+        if(recording)
+            AudioEncodingTest.testAACEncoders(getApplicationContext());
+
+        /*
         Log.i(TAG, "Record button hit. Start: " + String.valueOf(recording));
 
         if(recording){
@@ -91,8 +87,9 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
             Log.i(TAG, "HWRecorderActivity saw #frames: " + numFramesPreviewed);
 
         }
-    }
-
+        */
+}
+    /*
     @Override
     public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
         mCamera = Camera.open();
@@ -111,6 +108,7 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
         }
     }
 
+
     @Override
     public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
 
@@ -127,5 +125,6 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
     public void onSurfaceTextureUpdated(SurfaceTexture surface) {
 
     }
+    */
 
 }
