@@ -1,11 +1,17 @@
 package net.openwatch.hwencoderexperiments;
 
 import android.app.Activity;
+import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.os.Bundle;
+import android.util.Log;
+import android.view.TextureView;
 import android.view.View;
 
-public class HWRecorderActivity extends Activity /*implements TextureView.SurfaceTextureListener */{
+import java.io.IOException;
+import java.util.List;
+
+public class HWRecorderActivity extends Activity implements TextureView.SurfaceTextureListener {
     private static final String TAG = "CameraToMpegTest";
 
     Camera mCamera;
@@ -13,6 +19,7 @@ public class HWRecorderActivity extends Activity /*implements TextureView.Surfac
     boolean recording = false;
     int bufferSize = 460800;
     int numFramesPreviewed = 0;
+    AudioSoftwarePoller audioPoller;
 
     // testing
     long lastFrameTime = 0;
@@ -20,8 +27,8 @@ public class HWRecorderActivity extends Activity /*implements TextureView.Surfac
     protected void onCreate (Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_camera_to_mpeg_test);
-        //TextureView tv = (TextureView) findViewById(R.id.cameraPreview);
-        //tv.setSurfaceTextureListener(this);
+        TextureView tv = (TextureView) findViewById(R.id.cameraPreview);
+        tv.setSurfaceTextureListener(this);
 
         // testing
         /*
@@ -41,12 +48,15 @@ public class HWRecorderActivity extends Activity /*implements TextureView.Surfac
         */
     }
 
+    //static byte[] audioData;
+
     public void onRecordButtonClick(View v){
         recording = !recording;
+        /*
         if(recording)
             AudioEncodingTest.testAACEncoders(getApplicationContext());
+        */
 
-        /*
         Log.i(TAG, "Record button hit. Start: " + String.valueOf(recording));
 
         if(recording){
@@ -54,7 +64,6 @@ public class HWRecorderActivity extends Activity /*implements TextureView.Surfac
             audioPoller.startPolling();
 
             mEncoder = new ChunkedAvcEncoder(getApplicationContext());
-            final byte[] dummyAudio = new byte[343];
             mCamera.addCallbackBuffer(new byte[bufferSize]);
             mCamera.addCallbackBuffer(new byte[bufferSize]);
             mCamera.addCallbackBuffer(new byte[bufferSize]);
@@ -69,8 +78,15 @@ public class HWRecorderActivity extends Activity /*implements TextureView.Surfac
                     numFramesPreviewed++;
                     //Log.i(TAG, "Inter-frame time: " + (System.currentTimeMillis() - lastFrameTime) + " ms");
                     mEncoder.offerVideoEncoder(data);
-                    //mEncoder.offerAudioEncoder(audioPoller.emptyBuffer());
-                    mEncoder.offerAudioEncoder(dummyAudio);
+                    /*
+                    audioData = audioPoller.emptyBuffer();
+                    if(audioData != null){
+                        mEncoder.offerAudioEncoder(audioData);
+                        Log.i("AudioPoll", "Got " + audioData.length + " audio bytes");
+                    }else
+                        Log.i("AudioPoll", "No audio bytes ready");
+                    */
+                    mEncoder.offerAudioEncoder(getSimulatedAudioInput());
                     mCamera.addCallbackBuffer(data);
                     lastFrameTime = System.currentTimeMillis();
                     if(!recording){ // One frame must be sent with EOS flag after stop requested
@@ -87,9 +103,23 @@ public class HWRecorderActivity extends Activity /*implements TextureView.Surfac
             Log.i(TAG, "HWRecorderActivity saw #frames: " + numFramesPreviewed);
 
         }
-        */
-}
-    /*
+
+    }
+
+    static byte[] audioData;
+    private static byte[] getSimulatedAudioInput(){
+        int magnitude = 10;
+        if(audioData == null){
+            audioData = new byte[1024];
+            for(int x=0; x<audioData.length - 1; x++){
+                audioData[x] = (byte) (magnitude * Math.sin(x));
+            }
+            Log.i(TAG, "generated simulated audio data");
+        }
+        return audioData;
+
+    }
+
     @Override
     public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
         mCamera = Camera.open();
@@ -125,6 +155,4 @@ public class HWRecorderActivity extends Activity /*implements TextureView.Surfac
     public void onSurfaceTextureUpdated(SurfaceTexture surface) {
 
     }
-    */
-
 }

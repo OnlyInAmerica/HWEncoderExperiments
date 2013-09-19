@@ -28,6 +28,7 @@ public class AudioSoftwarePoller {
     public static final int CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO;
     public static final int AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT;
     public static final int FRAMES_PER_BUFFER = 43; // 1 sec @ 1024 samples/frame (aac)
+    public static long US_PER_FRAME = 0;
     public static boolean is_recording = false;
     final boolean VERBOSE = false;
     public RecorderTask recorderTask = new RecorderTask();
@@ -51,6 +52,18 @@ public class AudioSoftwarePoller {
     public void setSamplesPerFrame(int samples_per_frame) {
         if (!is_recording)
             recorderTask.samples_per_frame = samples_per_frame;
+    }
+
+    /**
+     * Return the number of microseconds represented by each audio frame
+     * calculated with the sampling rate and samples per frame
+     * @return
+     */
+    public long getMicroSecondsPerFrame(){
+        if(US_PER_FRAME == 0){
+            US_PER_FRAME = (SAMPLE_RATE / recorderTask.samples_per_frame) * 1000000;
+        }
+        return US_PER_FRAME;
     }
 
     /**

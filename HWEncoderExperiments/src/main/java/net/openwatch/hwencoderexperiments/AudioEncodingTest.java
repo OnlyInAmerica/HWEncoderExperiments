@@ -118,23 +118,30 @@ public class AudioEncodingTest {
 
     private static int queueInputBuffer(
             MediaCodec codec, ByteBuffer[] inputBuffers, int index) {
+
+        byte[] data = audioPoller.emptyBuffer();
+        if(data == null){
+            Log.i(TAG, "audioPoller returned no data");
+            return 0;
+        }
         ByteBuffer buffer = inputBuffers[index];
         buffer.clear();
 
         //int size = buffer.limit();
 
         //byte[] zeroes = new byte[size];
+
+        /*
         byte[] data = getSimulatedAudioInput();
         int size = data.length;
         buffer.put(data);
+        */
+
         // audioPoller audio
-        /*
-        byte[] data = audioPoller.emptyBuffer();
-        if(data == null)
-            return 0;
+
         int size = data.length;
         buffer.put(data);
-        */
+
         lastQueuedPresentationTimeStampUs = getNextQueuedPresentationTimeStampUs();
         if (VERBOSE) Log.i(BUFFER_TAG, "queueInputBuffer " + size + " bytes of input with pts: " + lastQueuedPresentationTimeStampUs);
         codec.queueInputBuffer(index, 0 /* offset */, size, lastQueuedPresentationTimeStampUs /* timeUs */, 0);

@@ -49,7 +49,13 @@ public class ChunkedAvcEncoder {
 
     // Audio state
     private static long lastQueuedAudioPresentationTimeStampUs = 0;
+    private static long nextQueuedAudioPresentationTimeStampUs = 0;
     private static long lastDequeuedAudioPresentationTimeStampUs = 0;
+    private static long nextDequeuedAudioPresentationTimeStampUs = 0;
+
+    private static long AUDIO_FRAME_DURATION_US = 23219; // 1024 audio samples @ 44100 samples/sec in micro seconds
+                                                         // precisely: 23219.9546485
+    private static long AUDIO_SAMPLES_PER_FRAME = 1024;
 
     Context c;
 
@@ -97,7 +103,7 @@ public class ChunkedAvcEncoder {
         audioFormat.setInteger(MediaFormat.KEY_SAMPLE_RATE, 44100);
         audioFormat.setInteger(MediaFormat.KEY_CHANNEL_COUNT, 1);
         audioFormat.setInteger(MediaFormat.KEY_BIT_RATE, 128000);
-        audioFormat.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 13312);
+        audioFormat.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384);
 
         mAudioEncoder = MediaCodec.createEncoderByType(AUDIO_MIME_TYPE);
         mAudioEncoder.configure(audioFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
@@ -262,10 +268,13 @@ public class ChunkedAvcEncoder {
                 ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
                 inputBuffer.clear();
                 inputBuffer.put(input);
-                lastQueuedAudioPresentationTimeStampUs = getNextAudioQueuedPresentationTimeStampUs();
+                Log.i(TAG, "Audio input buffer limit: " + inputBuffer.limit() + " Audio data size: " + input.length);
+                //lastQueuedAudioPresentationTimeStampUs = getNextAudioQueuedPresentationTimeStampUs();
                 if(eosReceived){
                     Log.i(TAG, "EOS received in offerEncoder");
-                    mAudioEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, lastQueuedAudioPresentationTimeStampUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                    mAudioEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, nextQueuedAudioPresentationTimeStampUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                    lastQueuedAudioPresentationTimeStampUs = nextQueuedAudioPresentationTimeStampUs;
+                    nextQueuedAudioPresentationTimeStampUs = getNextAudioQueuedPresentationTimeStampUs((int) (input.length / AUDIO_SAMPLES_PER_FRAME), AUDIO_FRAME_DURATION_US);
                     closeEncoderAndMuxer(mAudioEncoder, mAudioBufferInfo, mAudioTrackIndex); // always called after video, so safe to close muxer
                     eosSentToAudioEncoder = true;
                     if(!stopReceived){
@@ -276,8 +285,11 @@ public class ChunkedAvcEncoder {
                         Log.i(TAG, "Stopping Encoding Service");
                         encodingService.shutdown();
                     }
-                }else
-                    mAudioEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, lastQueuedAudioPresentationTimeStampUs, 0);
+                }else{
+                    mAudioEncoder.queueInputBuffer(inputBufferIndex, 0, input.length, nextQueuedAudioPresentationTimeStampUs, 0);
+                    lastQueuedAudioPresentationTimeStampUs = nextQueuedAudioPresentationTimeStampUs;
+                    nextQueuedAudioPresentationTimeStampUs = getNextAudioQueuedPresentationTimeStampUs((int) (input.length / AUDIO_SAMPLES_PER_FRAME), AUDIO_FRAME_DURATION_US);
+                }
             }
         } catch (Throwable t) {
             Log.e(TAG, "_offerAudioEncoder exception");
@@ -354,10 +366,14 @@ public class ChunkedAvcEncoder {
                     // adjust the ByteBuffer values to match BufferInfo (not needed?)
                     encodedData.position(bufferInfo.offset);
                     encodedData.limit(bufferInfo.offset + bufferInfo.size);
-                    if (encoder == mAudioEncoder) bufferInfo.presentationTimeUs = getNextAudioDeQueuedPresentationTimeStampUs();
+                    //if (encoder == mAudioEncoder) bufferInfo.presentationTimeUs = getNextAudioDeQueuedPresentationTimeStampUs();
+                    if (encoder == mAudioEncoder) bufferInfo.presentationTimeUs = nextDequeuedAudioPresentationTimeStampUs;
                     mMuxer.writeSampleData(trackIndex.index, encodedData, bufferInfo);
-                    if (encoder == mAudioEncoder) lastDequeuedAudioPresentationTimeStampUs = bufferInfo.presentationTimeUs;
-                    if (VERBOSE) Log.d(TAG, "sent " + bufferInfo.size + ((encoder == mVideoEncoder) ? " video " : " audio") + " bytes to muxer with pts " + bufferInfo.presentationTimeUs);
+                    if (encoder == mAudioEncoder){
+                        lastDequeuedAudioPresentationTimeStampUs = bufferInfo.presentationTimeUs;
+                        nextDequeuedAudioPresentationTimeStampUs = getNextAudioDeQueuedPresentationTimeStampUs( ((double)bufferInfo.size) / AUDIO_SAMPLES_PER_FRAME, AUDIO_FRAME_DURATION_US);
+                    }
+                    if (VERBOSE) Log.d(TAG, "sent " + bufferInfo.size + ((encoder == mVideoEncoder) ? " video" : " audio") + " bytes to muxer with pts " + bufferInfo.presentationTimeUs);
                 }
 
                 encoder.releaseOutputBuffer(encoderStatus, false);
@@ -374,15 +390,23 @@ public class ChunkedAvcEncoder {
         }
     }
 
-    private static long getNextAudioQueuedPresentationTimeStampUs(){
-        long nextQueuedPresentationTimeStampUs = (lastQueuedAudioPresentationTimeStampUs > lastDequeuedAudioPresentationTimeStampUs) ? (lastQueuedAudioPresentationTimeStampUs + 1) : (lastDequeuedAudioPresentationTimeStampUs + 1);
-        Log.i(TAG, "nextQueuedPresentationTimeStampUs: " + nextQueuedPresentationTimeStampUs);
+    /**
+     * Given a number of audio frames and the duration of each frame in microseconds,
+     * generate the next presentationTimeStamp. This method should be used to adjust the
+     * value of
+     * @param numFrames
+     * @param usPerFrame
+     * @return
+     */
+    private static long getNextAudioQueuedPresentationTimeStampUs(int numFrames, long usPerFrame){
+        long nextQueuedPresentationTimeStampUs = (lastQueuedAudioPresentationTimeStampUs > lastDequeuedAudioPresentationTimeStampUs) ? (lastQueuedAudioPresentationTimeStampUs + (numFrames * usPerFrame)) : (lastDequeuedAudioPresentationTimeStampUs + (numFrames * usPerFrame));
+        Log.i(TAG, "nextAudioQueuedPresentationTimeStampUs: " + nextQueuedPresentationTimeStampUs);
         return nextQueuedPresentationTimeStampUs;
     }
 
-    private static long getNextAudioDeQueuedPresentationTimeStampUs(){
-        Log.i(TAG, "nextDequeuedPresentationTimeStampUs: " + (lastDequeuedAudioPresentationTimeStampUs + 1));
-        lastDequeuedAudioPresentationTimeStampUs++;
+    private static long getNextAudioDeQueuedPresentationTimeStampUs(double numFrames, long usPerFrame){
+        Log.i(TAG, "nextAudioDequeuedPresentationTimeStampUs: " + (lastDequeuedAudioPresentationTimeStampUs + (numFrames * usPerFrame)) + " numFrames: " + numFrames);
+        lastDequeuedAudioPresentationTimeStampUs += (numFrames * usPerFrame);
         return lastDequeuedAudioPresentationTimeStampUs;
     }
 
