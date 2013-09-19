@@ -9,6 +9,7 @@ import android.view.TextureView;
 import android.view.View;
 
 import java.io.IOException;
+import java.util.Date;
 import java.util.List;
 
 public class HWRecorderActivity extends Activity implements TextureView.SurfaceTextureListener {
@@ -23,6 +24,8 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
 
     // testing
     long lastFrameTime = 0;
+    long recordingStartTime = 0;
+    long recordingEndTime = 0;
 
     protected void onCreate (Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
@@ -60,6 +63,8 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
         Log.i(TAG, "Record button hit. Start: " + String.valueOf(recording));
 
         if(recording){
+            recordingStartTime = new Date().getTime();
+
             audioPoller = new AudioSoftwarePoller();
             audioPoller.startPolling();
 
@@ -78,20 +83,22 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
                     numFramesPreviewed++;
                     //Log.i(TAG, "Inter-frame time: " + (System.currentTimeMillis() - lastFrameTime) + " ms");
                     mEncoder.offerVideoEncoder(data);
-                    /*
+
                     audioData = audioPoller.emptyBuffer();
                     if(audioData != null){
                         mEncoder.offerAudioEncoder(audioData);
                         Log.i("AudioPoll", "Got " + audioData.length + " audio bytes");
                     }else
                         Log.i("AudioPoll", "No audio bytes ready");
-                    */
-                    mEncoder.offerAudioEncoder(getSimulatedAudioInput());
+
+                    //mEncoder.offerAudioEncoder(getSimulatedAudioInput());
                     mCamera.addCallbackBuffer(data);
                     lastFrameTime = System.currentTimeMillis();
                     if(!recording){ // One frame must be sent with EOS flag after stop requested
                         camera.setPreviewCallbackWithBuffer(null);
                         audioPoller.stopPolling();
+                        recordingEndTime = new Date().getTime();
+                        Log.i(TAG, "HWRecorderActivity saw #frames: " + numFramesPreviewed + " over " +  ((recordingEndTime - recordingStartTime) / 1000) + " s for " + (numFramesPreviewed / ((recordingEndTime - recordingStartTime) / 1000)) + " fps");
                     }
                 }
             });
@@ -100,8 +107,6 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
             if(mEncoder != null){
                 mEncoder.stop();
             }
-            Log.i(TAG, "HWRecorderActivity saw #frames: " + numFramesPreviewed);
-
         }
 
     }
@@ -110,7 +115,8 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
     private static byte[] getSimulatedAudioInput(){
         int magnitude = 10;
         if(audioData == null){
-            audioData = new byte[1024];
+            //audioData = new byte[1024];
+            audioData = new byte[1470]; // this is roughly equal to the audio expected between 30 fps frames
             for(int x=0; x<audioData.length - 1; x++){
                 audioData[x] = (byte) (magnitude * Math.sin(x));
             }

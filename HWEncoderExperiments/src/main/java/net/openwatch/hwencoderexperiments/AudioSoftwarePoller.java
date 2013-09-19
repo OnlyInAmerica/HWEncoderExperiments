@@ -22,7 +22,8 @@ import android.util.Log;
  * 4. recorder.stopPolling();
  */
 public class AudioSoftwarePoller {
-
+    // 0.0333333333333 s per video frame
+    //
     public static final String TAG = "AudioSoftwarePoller";
     public static final int SAMPLE_RATE = 44100;
     public static final int CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO;

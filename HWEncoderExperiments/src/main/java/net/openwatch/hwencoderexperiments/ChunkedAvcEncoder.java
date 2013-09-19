@@ -57,6 +57,10 @@ public class ChunkedAvcEncoder {
                                                          // precisely: 23219.9546485
     private static long AUDIO_SAMPLES_PER_FRAME = 1024;
 
+    // Muxer state
+    private static final int TOTAL_NUM_TRACKS = 2;
+    private static int numTracksAdded = 0;
+
     Context c;
 
     private ExecutorService encodingService = Executors.newSingleThreadExecutor(); // re-use encodingService
@@ -72,12 +76,16 @@ public class ChunkedAvcEncoder {
     }
 
     private void prepare(){
+        numTracksAdded = 0;
         frameCount = 0;
         eosReceived = false;
         eosSentToVideoEncoder = false;
         eosSentToAudioEncoder = false;
+        stopReceived = false;
         lastQueuedAudioPresentationTimeStampUs = 0;
         lastDequeuedAudioPresentationTimeStampUs = 0;
+        nextDequeuedAudioPresentationTimeStampUs = 0;
+        nextQueuedAudioPresentationTimeStampUs = 0;
         framesPerChunk = CHUNK_DURATION_SEC * FRAMES_PER_SECOND;
         File f = FileUtils.createTempFileInRootAppStorage(c, "test_" + currentChunk + ".mp4");
 
@@ -111,11 +119,11 @@ public class ChunkedAvcEncoder {
 
         try {
             mMuxer = new MediaMuxer(f.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
-            mVideoTrackIndex.index = mMuxer.addTrack(videoFormat);
+            /*mVideoTrackIndex.index = mMuxer.addTrack(videoFormat);
             mAudioTrackIndex.index = mMuxer.addTrack(audioFormat);
             Log.i(TAG, "Added tracks. Video: " + mVideoTrackIndex.index + " Audio: " + mAudioTrackIndex.index);
             mMuxer.start();
-            mMuxerStarted = true;
+            mMuxerStarted = true;*/
         } catch (IOException ioe) {
             throw new RuntimeException("MediaMuxer creation failed", ioe);
         }
@@ -162,6 +170,7 @@ public class ChunkedAvcEncoder {
         mMuxer.stop();
         mMuxer.release();
         mMuxer = null;
+        mMuxerStarted = false;
     }
 
     long lastFrameTime = -1;
@@ -325,9 +334,9 @@ public class ChunkedAvcEncoder {
                 encoderOutputBuffers = encoder.getOutputBuffers();
             } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 // should happen before receiving buffers, and should only happen once
-                /*
+
                 if (mMuxerStarted) {
-                    throw new RuntimeException("format changed twice");
+                    throw new RuntimeException("format changed after muxer start");
                 }
                 MediaFormat newFormat = encoder.getOutputFormat();
 
@@ -338,8 +347,9 @@ public class ChunkedAvcEncoder {
                 if(numTracksAdded == TOTAL_NUM_TRACKS){
                     mMuxer.start();
                     mMuxerStarted = true;
+                    Log.i(TAG, "All tracks added. Muxer started");
                 }
-                */
+
             } else if (encoderStatus < 0) {
                 Log.w(TAG, "unexpected result from encoder.dequeueOutputBuffer: " +
                         encoderStatus);
@@ -351,12 +361,14 @@ public class ChunkedAvcEncoder {
                             " was null");
                 }
 
+
                 if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
                     // The codec config data was pulled out and fed to the muxer when we got
                     // the INFO_OUTPUT_FORMAT_CHANGED status.  Ignore it.
                     if (VERBOSE) Log.d(TAG, "ignoring BUFFER_FLAG_CODEC_CONFIG");
                     bufferInfo.size = 0;
                 }
+
 
                 if (bufferInfo.size != 0) {
                     if (!mMuxerStarted) {
