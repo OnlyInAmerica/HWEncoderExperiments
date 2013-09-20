@@ -23,7 +23,6 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
     AudioSoftwarePoller audioPoller;
 
     // testing
-    long lastFrameTime = 0;
     long recordingStartTime = 0;
     long recordingEndTime = 0;
 
@@ -82,18 +81,7 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
                     numFramesPreviewed++;
                     //Log.i(TAG, "Inter-frame time: " + (System.currentTimeMillis() - lastFrameTime) + " ms");
                     mEncoder.offerVideoEncoder(data.clone());
-
-                    /*
-                    audioData = audioPoller.emptyBuffer();
-                    if(audioData != null){
-                        mEncoder.offerAudioEncoder(audioData);
-                        Log.i("AudioPoll", "Got " + audioData.length + " audio bytes");
-                    }else
-                        Log.i("AudioPoll", "No audio bytes ready");
-                    */
-                    //mEncoder.offerAudioEncoder(getSimulatedAudioInput());
                     mCamera.addCallbackBuffer(data);
-                    lastFrameTime = System.currentTimeMillis();
                     if(!recording){ // One frame must be sent with EOS flag after stop requested
                         camera.setPreviewCallbackWithBuffer(null);
                         audioPoller.stopPolling();
@@ -102,7 +90,6 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
                     }
                 }
             });
-            lastFrameTime = System.currentTimeMillis();
             audioPoller = new AudioSoftwarePoller(mEncoder);
             audioPoller.startPolling();
         }else{
@@ -138,7 +125,6 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
             List<int[]> fpsRanges = parameters.getSupportedPreviewFpsRange();
             int[] maxFpsRange = fpsRanges.get(fpsRanges.size() - 1);
             parameters.setPreviewFpsRange(maxFpsRange[0], maxFpsRange[1]);
-            //parameters.setPreviewFormat(ImageFormat.YV12);
             mCamera.setParameters(parameters);
             mCamera.setDisplayOrientation(90);
             mCamera.startPreview();

@@ -66,6 +66,7 @@ public class ChunkedAvcEncoder {
     Context c;
 
     private ExecutorService encodingService = Executors.newSingleThreadExecutor(); // re-use encodingService
+    int encodingServiceQueueLength = 0;
 
     // Can't pass an int by reference in Java...
     class TrackIndex{
@@ -182,6 +183,7 @@ public class ChunkedAvcEncoder {
         if(!encodingService.isShutdown()){
             long thisFrameTime = System.nanoTime();
             encodingService.submit(new EncoderTask(this, input, null, thisFrameTime));
+            encodingServiceQueueLength ++;
         }
 
     }
@@ -240,6 +242,7 @@ public class ChunkedAvcEncoder {
         if(!encodingService.isShutdown()){
             //long thisFrameTime = (presentationTimeNs == 0) ? System.nanoTime() : presentationTimeNs;
             encodingService.submit(new EncoderTask(this, null, input, presentationTimeStampNs));
+            encodingServiceQueueLength++;
         }
 
     }
@@ -380,7 +383,6 @@ public class ChunkedAvcEncoder {
                     // adjust the ByteBuffer values to match BufferInfo (not needed?)
                     encodedData.position(bufferInfo.offset);
                     encodedData.limit(bufferInfo.offset + bufferInfo.size);
-                    Log.i(TAG, "dequeueOutputBuffer " + bufferInfo.presentationTimeUs);
                     mMuxer.writeSampleData(trackIndex.index, encodedData, bufferInfo);
                     if (VERBOSE) Log.d(TAG, "sent " + bufferInfo.size + ((encoder == mVideoEncoder) ? " video" : " audio") + " bytes to muxer with pts " + bufferInfo.presentationTimeUs);
                 }
@@ -471,10 +473,14 @@ public class ChunkedAvcEncoder {
         */
 
         private void encodeFrame(){
-            if(encoder != null && video_data != null)
+            if(encoder != null && video_data != null){
                 encoder._offerVideoEncoder(video_data, presentationTimeNs);
-            else if(encoder != null && audio_data != null)
+                video_data = null;
+            }
+            else if(encoder != null && audio_data != null){
                 encoder._offerAudioEncoder(audio_data, presentationTimeNs);
+                audio_data = null;
+            }
         }
 
         private void finalizeEncoder(){
@@ -500,6 +506,8 @@ public class ChunkedAvcEncoder {
                 }
                 // prevent multiple execution of same task
                 is_initialized = false;
+                encodingServiceQueueLength -=1;
+                //Log.i("EncodingService", "Queue length: " + encodingServiceQueueLength);
             }
             else{
                 Log.e(TAG, "run() called but EncoderTask not initialized");
