@@ -22,13 +22,11 @@ import android.util.Log;
  * 4. recorder.stopPolling();
  */
 public class AudioSoftwarePoller {
-    // 0.0333333333333 s per video frame
-    //
     public static final String TAG = "AudioSoftwarePoller";
     public static final int SAMPLE_RATE = 44100;
     public static final int CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO;
     public static final int AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT;
-    public static final int FRAMES_PER_BUFFER = 43; // 1 sec @ 1024 samples/frame (aac)
+    public static final int FRAMES_PER_BUFFER = 24; // 1 sec @ 1024 samples/frame (aac)
     public static long US_PER_FRAME = 0;
     public static boolean is_recording = false;
     final boolean VERBOSE = false;
@@ -41,7 +39,14 @@ public class AudioSoftwarePoller {
     int tail_distance;            // if the buffer_write_index < buffer_read_index, how many items shall
     // we copy from the buffer tail before resuming from the buffer head
 
+    static ChunkedAvcEncoder avcEncoder;
+
     public AudioSoftwarePoller() {
+    }
+
+
+    public AudioSoftwarePoller(ChunkedAvcEncoder avcEncoder) {
+        this.avcEncoder = avcEncoder;
     }
 
     /**
@@ -128,11 +133,14 @@ public class AudioSoftwarePoller {
     public class RecorderTask implements Runnable {
         public int buffer_size;
         public int samples_per_frame = 1024;    // codec-specific
+        //public int samples_per_frame = 2048;    // codec-specific
         public int buffer_write_index = 0;        // last buffer index written to
         public int buffer_read_index = 0;        // first buffer index to read from
         public byte[] data_buffer;
         public int total_frames_written = 0;
         public int total_frames_read = 0;
+
+        int read_result = 0;
 
         public void run() {
             int min_buffer_size = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT);
@@ -144,7 +152,7 @@ public class AudioSoftwarePoller {
             if (buffer_size < min_buffer_size)
                 buffer_size = ((min_buffer_size / samples_per_frame) + 1) * samples_per_frame * 2;
 
-            data_buffer = new byte[buffer_size]; // filled directly by hardware
+            data_buffer = new byte[samples_per_frame]; // filled directly by hardware
 
             AudioRecord audio_recorder;
             audio_recorder = new AudioRecord(
@@ -158,13 +166,20 @@ public class AudioSoftwarePoller {
             audio_recorder.startRecording();
             is_recording = true;
             Log.i("AudioSoftwarePoller", "SW recording begin");
+            long audioPresentationTimeNs;
             while (is_recording) {
-                audio_recorder.read(data_buffer, buffer_write_index, samples_per_frame);
+                //read_result = audio_recorder.read(data_buffer, buffer_write_index, samples_per_frame);
+                audioPresentationTimeNs = System.nanoTime();
+                read_result = audio_recorder.read(data_buffer, 0, samples_per_frame);
                 if (VERBOSE)
                     Log.i("AudioSoftwarePoller-FillBuffer", String.valueOf(buffer_write_index) + " - " + String.valueOf(buffer_write_index + samples_per_frame - 1));
-                buffer_write_index = (buffer_write_index + samples_per_frame) % buffer_size;
+                if(read_result == AudioRecord.ERROR_BAD_VALUE || read_result == AudioRecord.ERROR_INVALID_OPERATION)
+                    Log.e("AudioSoftwarePoller", "Read error");
+                //buffer_write_index = (buffer_write_index + samples_per_frame) % buffer_size;
                 total_frames_written++;
-
+                if(avcEncoder != null){
+                    avcEncoder.offerAudioEncoder(data_buffer.clone(), audioPresentationTimeNs);
+                }
             }
             if (audio_recorder != null) {
                 audio_recorder.setRecordPositionUpdateListener(null);

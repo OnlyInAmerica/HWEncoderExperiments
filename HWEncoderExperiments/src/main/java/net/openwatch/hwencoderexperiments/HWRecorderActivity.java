@@ -65,9 +65,6 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
         if(recording){
             recordingStartTime = new Date().getTime();
 
-            audioPoller = new AudioSoftwarePoller();
-            audioPoller.startPolling();
-
             mEncoder = new ChunkedAvcEncoder(getApplicationContext());
             mCamera.addCallbackBuffer(new byte[bufferSize]);
             mCamera.addCallbackBuffer(new byte[bufferSize]);
@@ -78,19 +75,22 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
             mCamera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
                 @Override
                 public void onPreviewFrame(byte[] data, Camera camera) {
-                    if(!audioPoller.is_recording)
+                    if(!audioPoller.is_recording){
+                        mCamera.addCallbackBuffer(data);
                         return;
+                    }
                     numFramesPreviewed++;
                     //Log.i(TAG, "Inter-frame time: " + (System.currentTimeMillis() - lastFrameTime) + " ms");
-                    mEncoder.offerVideoEncoder(data);
+                    mEncoder.offerVideoEncoder(data.clone());
 
+                    /*
                     audioData = audioPoller.emptyBuffer();
                     if(audioData != null){
                         mEncoder.offerAudioEncoder(audioData);
                         Log.i("AudioPoll", "Got " + audioData.length + " audio bytes");
                     }else
                         Log.i("AudioPoll", "No audio bytes ready");
-
+                    */
                     //mEncoder.offerAudioEncoder(getSimulatedAudioInput());
                     mCamera.addCallbackBuffer(data);
                     lastFrameTime = System.currentTimeMillis();
@@ -103,6 +103,8 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
                 }
             });
             lastFrameTime = System.currentTimeMillis();
+            audioPoller = new AudioSoftwarePoller(mEncoder);
+            audioPoller.startPolling();
         }else{
             if(mEncoder != null){
                 mEncoder.stop();
@@ -136,6 +138,7 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
             List<int[]> fpsRanges = parameters.getSupportedPreviewFpsRange();
             int[] maxFpsRange = fpsRanges.get(fpsRanges.size() - 1);
             parameters.setPreviewFpsRange(maxFpsRange[0], maxFpsRange[1]);
+            //parameters.setPreviewFormat(ImageFormat.YV12);
             mCamera.setParameters(parameters);
             mCamera.setDisplayOrientation(90);
             mCamera.startPreview();
