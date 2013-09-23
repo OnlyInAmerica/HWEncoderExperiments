@@ -5,6 +5,8 @@ import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 import android.view.TextureView;
 import android.view.View;
 
@@ -12,7 +14,7 @@ import java.io.IOException;
 import java.util.Date;
 import java.util.List;
 
-public class HWRecorderActivity extends Activity implements TextureView.SurfaceTextureListener {
+public class HWRecorderActivity extends Activity implements TextureView.SurfaceTextureListener, SurfaceHolder.Callback {
     private static final String TAG = "CameraToMpegTest";
 
     Camera mCamera;
@@ -26,11 +28,19 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
     long recordingStartTime = 0;
     long recordingEndTime = 0;
 
+    boolean useTextureView = false;
+
     protected void onCreate (Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_camera_to_mpeg_test);
-        TextureView tv = (TextureView) findViewById(R.id.cameraPreview);
-        tv.setSurfaceTextureListener(this);
+        if(useTextureView){
+            setContentView(R.layout.activity_hwrecorder_textureview);
+            TextureView tv = (TextureView) findViewById(R.id.cameraPreview);
+            tv.setSurfaceTextureListener(this);
+        }else{
+            setContentView(R.layout.activity_hwrecorder_surfaceview);
+            SurfaceView surfaceView = (SurfaceView) findViewById(R.id.cameraPreview);
+            surfaceView.getHolder().addCallback(this);
+        }
 
         // testing
         /*
@@ -115,22 +125,45 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
 
     }
 
-    @Override
-    public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-        mCamera = Camera.open();
+    private void setupCamera(){
+        Camera.Parameters parameters = mCamera.getParameters();
+        List<int[]> fpsRanges = parameters.getSupportedPreviewFpsRange();
+        int[] maxFpsRange = fpsRanges.get(fpsRanges.size() - 1);
+        parameters.setPreviewFpsRange(maxFpsRange[0], maxFpsRange[1]);
+        mCamera.setParameters(parameters);
+        mCamera.setDisplayOrientation(90);
+        mCamera.startPreview();
 
+    }
+
+    private void setupCameraWithSurfaceTexture(SurfaceTexture surface){
+        mCamera = Camera.open();
         try {
             mCamera.setPreviewTexture(surface);
-            Camera.Parameters parameters = mCamera.getParameters();
-            List<int[]> fpsRanges = parameters.getSupportedPreviewFpsRange();
-            int[] maxFpsRange = fpsRanges.get(fpsRanges.size() - 1);
-            parameters.setPreviewFpsRange(maxFpsRange[0], maxFpsRange[1]);
-            mCamera.setParameters(parameters);
-            mCamera.setDisplayOrientation(90);
-            mCamera.startPreview();
-        } catch (IOException ioe) {
-            ioe.printStackTrace();
+            setupCamera();
+        } catch (IOException e) {
+            e.printStackTrace();
         }
+    }
+
+    private void setupCameraWithSurfaceHolder(SurfaceHolder surfaceHolder){
+        mCamera = Camera.open();
+        try {
+            mCamera.setPreviewDisplay(surfaceHolder);
+            setupCamera();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void stopCamera(){
+        mCamera.stopPreview();
+        mCamera.release();
+    }
+
+    @Override
+    public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
+        setupCameraWithSurfaceTexture(surface);
     }
 
 
@@ -141,13 +174,27 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
 
     @Override
     public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
-        mCamera.stopPreview();
-        mCamera.release();
+        stopCamera();
         return false;
     }
 
     @Override
     public void onSurfaceTextureUpdated(SurfaceTexture surface) {
 
+    }
+
+    @Override
+    public void surfaceCreated(SurfaceHolder holder) {
+        setupCameraWithSurfaceHolder(holder);
+    }
+
+    @Override
+    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+
+    }
+
+    @Override
+    public void surfaceDestroyed(SurfaceHolder holder) {
+        stopCamera();
     }
 }

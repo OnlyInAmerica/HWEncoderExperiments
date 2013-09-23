@@ -53,12 +53,6 @@ public class ChunkedAvcEncoder {
     // Audio state
     private static long audioBytesReceived = 0;
 
-
-    //private static double AUDIO_FRAME_DURATION_US = 46439.909297;
-    private static double AUDIO_FRAME_DURATION_US = 23219.9546485; // 1024 audio samples @ 44100 samples/sec in micro seconds
-
-    private static long AUDIO_SAMPLES_PER_FRAME = 1024;
-
     // Muxer state
     private static final int TOTAL_NUM_TRACKS = 2;
     private static int numTracksAdded = 0;
@@ -322,7 +316,8 @@ public class ChunkedAvcEncoder {
      * not recording audio.
      */
     private void drainEncoder(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo, TrackIndex trackIndex, boolean endOfStream) {
-        final int TIMEOUT_USEC = 10000;
+        long startTime = System.nanoTime();
+        final int TIMEOUT_USEC = 1000;
         if (VERBOSE) Log.d(TAG, "drainEncoder(" + endOfStream + ")");
         ByteBuffer[] encoderOutputBuffers = encoder.getOutputBuffers();
         while (true) {
@@ -399,6 +394,8 @@ public class ChunkedAvcEncoder {
                 }
             }
         }
+        long endTime = System.nanoTime();
+        Log.i(TAG, "Spend " + (endTime - startTime) + " ns in drainEncoder");
     }
 
     private void logStatistics(){
@@ -422,6 +419,7 @@ public class ChunkedAvcEncoder {
         private byte[] video_data;
         private byte[] audio_data;
         long presentationTimeNs;
+        long startTime;
 
         public EncoderTask(ChunkedAvcEncoder encoder, EncoderTaskType type){
             setEncoder(encoder);
@@ -450,6 +448,7 @@ public class ChunkedAvcEncoder {
 
         private void setEncoder(ChunkedAvcEncoder encoder){
             this.encoder = encoder;
+            startTime = System.nanoTime();
         }
 
         private void setFinalizeEncoderParams(){
@@ -507,7 +506,7 @@ public class ChunkedAvcEncoder {
                 // prevent multiple execution of same task
                 is_initialized = false;
                 encodingServiceQueueLength -=1;
-                //Log.i("EncodingService", "Queue length: " + encodingServiceQueueLength);
+                Log.i("EncodingService", "Queue length: " + encodingServiceQueueLength + " This job time (ns): " + (System.nanoTime() - startTime));
             }
             else{
                 Log.e(TAG, "run() called but EncoderTask not initialized");

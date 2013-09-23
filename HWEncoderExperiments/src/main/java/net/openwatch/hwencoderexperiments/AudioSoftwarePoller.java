@@ -132,8 +132,8 @@ public class AudioSoftwarePoller {
 
     public class RecorderTask implements Runnable {
         public int buffer_size;
-        public int samples_per_frame = 1024;    // codec-specific
-        //public int samples_per_frame = 2048;    // codec-specific
+        //public int samples_per_frame = 1024;    // codec-specific
+        public int samples_per_frame = 2048;    // codec-specific
         public int buffer_write_index = 0;        // last buffer index written to
         public int buffer_read_index = 0;        // first buffer index to read from
         public byte[] data_buffer;
