@@ -51,7 +51,7 @@ import java.nio.FloatBuffer;
  * (This was derived from bits and pieces of CTS tests, and is packaged as such, but is not
  * currently part of CTS.)
  */
-public class ChunkedHWRecorder {
+public class ChunkedHWSurfaceRecorder {
     private static final String TAG = "CameraToMpegTest";
     private static final boolean VERBOSE = true;           // lots of logging
     // where to put the output file (note: /sdcard requires WRITE_EXTERNAL_STORAGE permission)
@@ -542,16 +542,16 @@ public class ChunkedHWRecorder {
      */
     private static class CameraToMpegWrapper implements Runnable {
         private Throwable mThrowable;
-        private ChunkedHWRecorder mTest;
+        private ChunkedHWSurfaceRecorder mTest;
 
-        private CameraToMpegWrapper(ChunkedHWRecorder test) {
+        private CameraToMpegWrapper(ChunkedHWSurfaceRecorder test) {
             mTest = test;
         }
 
         /**
          * Entry point.
          */
-        public static void runTest(ChunkedHWRecorder obj) throws Throwable {
+        public static void runTest(ChunkedHWSurfaceRecorder obj) throws Throwable {
             CameraToMpegWrapper wrapper = new CameraToMpegWrapper(obj);
             Thread th = new Thread(wrapper, "codec test");
             th.start();
@@ -714,7 +714,7 @@ public class ChunkedHWRecorder {
     private static class SurfaceTextureManager
             implements SurfaceTexture.OnFrameAvailableListener {
         private SurfaceTexture mSurfaceTexture;
-        private ChunkedHWRecorder.STextureRender mTextureRender;
+        private ChunkedHWSurfaceRecorder.STextureRender mTextureRender;
         private Object mFrameSyncObject = new Object();     // guards mFrameAvailable
         private boolean mFrameAvailable;
 
@@ -722,7 +722,7 @@ public class ChunkedHWRecorder {
          * Creates instances of TextureRender and SurfaceTexture.
          */
         public SurfaceTextureManager() {
-            mTextureRender = new ChunkedHWRecorder.STextureRender();
+            mTextureRender = new ChunkedHWSurfaceRecorder.STextureRender();
             mTextureRender.surfaceCreated();
 
             if (VERBOSE) Log.d(TAG, String.format("textureID=%d", mTextureRender.getTextureId()) );

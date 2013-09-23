@@ -10,6 +10,7 @@ import android.view.SurfaceView;
 import android.view.TextureView;
 import android.view.View;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.Date;
 import java.util.List;
@@ -19,8 +20,10 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
 
     Camera mCamera;
     ChunkedAvcEncoder mEncoder;
+    MediaRecorderWrapper mMediaRecorderWrapper;
     boolean recording = false;
-    int bufferSize = 460800;
+    int bufferSize = 460800; // 640x480
+    //int bufferSize = 1382400; // 720p
     int numFramesPreviewed = 0;
     AudioSoftwarePoller audioPoller;
 
@@ -28,7 +31,7 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
     long recordingStartTime = 0;
     long recordingEndTime = 0;
 
-    boolean useTextureView = false;
+    boolean useTextureView = true;
 
     protected void onCreate (Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
@@ -64,20 +67,14 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
 
     public void onRecordButtonClick(View v){
         recording = !recording;
-        /*
-        if(recording)
-            AudioEncodingTest.testAACEncoders(getApplicationContext());
-        */
 
         Log.i(TAG, "Record button hit. Start: " + String.valueOf(recording));
 
         if(recording){
             recordingStartTime = new Date().getTime();
 
+            startMediaRecorder();
             mEncoder = new ChunkedAvcEncoder(getApplicationContext());
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
             mCamera.addCallbackBuffer(new byte[bufferSize]);
             mCamera.addCallbackBuffer(new byte[bufferSize]);
             mCamera.addCallbackBuffer(new byte[bufferSize]);
@@ -103,6 +100,7 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
             audioPoller = new AudioSoftwarePoller(mEncoder);
             audioPoller.startPolling();
         }else{
+            stopMediaRecorder();
             if(mEncoder != null){
                 mEncoder.stop();
             }
@@ -127,6 +125,8 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
 
     private void setupCamera(){
         Camera.Parameters parameters = mCamera.getParameters();
+        //List <Camera.Size> previewSizes = parameters.getSupportedPreviewSizes();
+        parameters.setPreviewSize(640, 480);
         List<int[]> fpsRanges = parameters.getSupportedPreviewFpsRange();
         int[] maxFpsRange = fpsRanges.get(fpsRanges.size() - 1);
         parameters.setPreviewFpsRange(maxFpsRange[0], maxFpsRange[1]);
@@ -159,6 +159,22 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
     private void stopCamera(){
         mCamera.stopPreview();
         mCamera.release();
+    }
+
+    private void startMediaRecorder(){
+        if(mMediaRecorderWrapper == null || !mMediaRecorderWrapper.isRecording){
+            File outputHq = FileUtils.createTempFileInRootAppStorage(getApplicationContext(), "hq.mp4");
+            mMediaRecorderWrapper = new MediaRecorderWrapper(getApplicationContext(), outputHq.getAbsolutePath(), mCamera);
+            mMediaRecorderWrapper.startRecording();
+        } else
+            Log.e(TAG, "MediaRecorderWrapper is already started");
+    }
+
+    private void stopMediaRecorder(){
+        if(mMediaRecorderWrapper != null && mMediaRecorderWrapper.isRecording){
+            mMediaRecorderWrapper.stopRecording();
+        }else
+            Log.e(TAG, "MediaRecorderWrapper is not recording");
     }
 
     @Override
