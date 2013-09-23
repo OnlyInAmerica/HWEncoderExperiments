@@ -316,7 +316,6 @@ public class ChunkedAvcEncoder {
      * not recording audio.
      */
     private void drainEncoder(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo, TrackIndex trackIndex, boolean endOfStream) {
-        long startTime = System.nanoTime();
         final int TIMEOUT_USEC = 1000;
         if (VERBOSE) Log.d(TAG, "drainEncoder(" + endOfStream + ")");
         ByteBuffer[] encoderOutputBuffers = encoder.getOutputBuffers();
@@ -395,7 +394,6 @@ public class ChunkedAvcEncoder {
             }
         }
         long endTime = System.nanoTime();
-        Log.i(TAG, "Spend " + (endTime - startTime) + " ns in drainEncoder");
     }
 
     private void logStatistics(){
@@ -419,7 +417,6 @@ public class ChunkedAvcEncoder {
         private byte[] video_data;
         private byte[] audio_data;
         long presentationTimeNs;
-        long startTime;
 
         public EncoderTask(ChunkedAvcEncoder encoder, EncoderTaskType type){
             setEncoder(encoder);
@@ -448,7 +445,6 @@ public class ChunkedAvcEncoder {
 
         private void setEncoder(ChunkedAvcEncoder encoder){
             this.encoder = encoder;
-            startTime = System.nanoTime();
         }
 
         private void setFinalizeEncoderParams(){
@@ -506,7 +502,6 @@ public class ChunkedAvcEncoder {
                 // prevent multiple execution of same task
                 is_initialized = false;
                 encodingServiceQueueLength -=1;
-                Log.i("EncodingService", "Queue length: " + encodingServiceQueueLength + " This job time (ns): " + (System.nanoTime() - startTime));
             }
             else{
                 Log.e(TAG, "run() called but EncoderTask not initialized");
