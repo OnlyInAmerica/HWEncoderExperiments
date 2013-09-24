@@ -97,7 +97,9 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
                     }
                 }
             });
-            audioPoller = new AudioSoftwarePoller(mEncoder);
+            audioPoller = new AudioSoftwarePoller();
+            audioPoller.setChunkedAvcEncoder(mEncoder);
+            mEncoder.setAudioSoftwarePoller(audioPoller);
             audioPoller.startPolling();
         }else{
             stopMediaRecorder();

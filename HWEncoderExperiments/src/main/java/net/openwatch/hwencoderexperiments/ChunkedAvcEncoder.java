@@ -57,9 +57,15 @@ public class ChunkedAvcEncoder {
     private MediaCodec.BufferInfo mAudioBufferInfo;
     private ExecutorService encodingService = Executors.newSingleThreadExecutor(); // re-use encodingService
 
+    AudioSoftwarePoller audioSoftwarePoller;
+
     public ChunkedAvcEncoder(Context c) {
         this.c = c;
         prepare();
+    }
+
+    public void setAudioSoftwarePoller(AudioSoftwarePoller audioSoftwarePoller){
+        this.audioSoftwarePoller = audioSoftwarePoller;
     }
 
     private void prepare() {
@@ -266,6 +272,11 @@ public class ChunkedAvcEncoder {
                 ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
                 inputBuffer.clear();
                 inputBuffer.put(input);
+                if(audioSoftwarePoller != null){
+                    //audioSoftwarePoller.recycleInputBuffer(input);
+                    audioSoftwarePoller.recorderTask.data_buffer.offer(input);
+                    //Log.i(TAG, "returned audio buffer to poller");
+                }
                 long presentationTimeUs = (presentationTimeNs - audioStartTime) / 1000;
                 //Log.i(TAG, "sent " + input.length + " audio bytes to encod with pts " + presentationTimeUs);
                 //nextQueuedAudioPresentationTimeStampUs = getNextAudioQueuedPresentationTimeStampUs((presentationTimeNs - audioStartTime) / 1000, input.length);
@@ -303,7 +314,7 @@ public class ChunkedAvcEncoder {
      * not recording audio.
      */
     private void drainEncoder(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo, TrackIndex trackIndex, boolean endOfStream) {
-        final int TIMEOUT_USEC = 1000;
+        final int TIMEOUT_USEC = 100;
         if (VERBOSE) Log.d(TAG, "drainEncoder(" + endOfStream + ")");
         ByteBuffer[] encoderOutputBuffers = encoder.getOutputBuffers();
         while (true) {
@@ -483,6 +494,7 @@ public class ChunkedAvcEncoder {
                 // prevent multiple execution of same task
                 is_initialized = false;
                 encodingServiceQueueLength -= 1;
+                Log.i(TAG, "EncodingService Queue length: " + encodingServiceQueueLength);
             } else {
                 Log.e(TAG, "run() called but EncoderTask not initialized");
             }

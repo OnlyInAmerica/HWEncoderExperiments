@@ -5,6 +5,8 @@ import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.util.Log;
 
+import java.util.concurrent.ArrayBlockingQueue;
+
 /*
  * This class polls audio from the microphone and fills a
  * circular buffer.
@@ -31,21 +33,14 @@ public class AudioSoftwarePoller {
     public static boolean is_recording = false;
     final boolean VERBOSE = false;
     public RecorderTask recorderTask = new RecorderTask();
-    public int read_distance;    // the greatest multiple of samples_per_frame < distance
-    // reused readAudioFrames() variables
-    int read_index;
-    int write_index;
-    int distance;                // difference between write / read indexes
-    int tail_distance;            // if the buffer_write_index < buffer_read_index, how many items shall
-    // we copy from the buffer tail before resuming from the buffer head
 
-    static ChunkedAvcEncoder avcEncoder;
+    ChunkedAvcEncoder avcEncoder;
 
     public AudioSoftwarePoller() {
     }
 
 
-    public AudioSoftwarePoller(ChunkedAvcEncoder avcEncoder) {
+    public void setChunkedAvcEncoder(ChunkedAvcEncoder avcEncoder) {
         this.avcEncoder = avcEncoder;
     }
 
@@ -72,6 +67,10 @@ public class AudioSoftwarePoller {
         return US_PER_FRAME;
     }
 
+    public void recycleInputBuffer(byte[] buffer){
+        recorderTask.data_buffer.offer(buffer);
+    }
+
     /**
      * Begin polling audio and transferring it to the buffer. Call this before emptyBuffer().
      */
@@ -87,58 +86,17 @@ public class AudioSoftwarePoller {
         // by recorderTask
     }
 
-    /**
-     * Reads audio samples from the buffer.
-     *
-     * @return all audio data polled since the last call to this method. Output length is equal to, or a multiple of, samples_per_frame.
-     * Set samples per frame with setSamplesPerFrame. If there is less than samples_per_frame samples ready, returns null.
-     */
-    public byte[] emptyBuffer() {
-        byte[] audio_samples = null;
-        read_index = recorderTask.buffer_read_index;
-        write_index = recorderTask.buffer_write_index;
-
-        if (write_index == 0 || write_index < recorderTask.samples_per_frame) {
-            if (VERBOSE) Log.i("AudioSoftwarePoller-ReadBuffer", "Buffer empty or smaller than samples_per_frame");
-            read_distance = 0;
-            return audio_samples; // if samples aren't ready, there's nothing to do
-        }
-        // Compute distance between read & write indexes in circular buffer
-        if (write_index < read_index)
-            distance = recorderTask.buffer_size - Math.abs((write_index - read_index));
-        else
-            distance = write_index - read_index;
-
-        read_distance = (distance / recorderTask.samples_per_frame) * recorderTask.samples_per_frame;
-
-        audio_samples = new byte[read_distance];
-
-        if (write_index < read_index) {
-            tail_distance = recorderTask.buffer_size - read_index;
-            // copy from buffer_read_index to end of buffer
-            System.arraycopy(recorderTask.data_buffer, read_index, audio_samples, 0, tail_distance);
-            // copy from start of buffer to buffer_write_index
-            System.arraycopy(recorderTask.data_buffer, 0, audio_samples, tail_distance - 1, read_distance - tail_distance);
-        } else
-            System.arraycopy(recorderTask.data_buffer, read_index, audio_samples, 0, read_distance);
-
-        if (VERBOSE)
-            Log.i("AudioSoftwarePoller-ReadBuffer", String.valueOf(read_index) + " - " + String.valueOf(write_index - 1) + " dist: " + String.valueOf(read_distance));
-
-        recorderTask.buffer_read_index = write_index;
-        recorderTask.total_frames_read += (distance / recorderTask.samples_per_frame);
-        return audio_samples;
-    }
-
     public class RecorderTask implements Runnable {
         public int buffer_size;
         //public int samples_per_frame = 1024;    // codec-specific
         public int samples_per_frame = 2048;    // codec-specific
         public int buffer_write_index = 0;        // last buffer index written to
         public int buffer_read_index = 0;        // first buffer index to read from
-        public byte[] data_buffer;
+        //public byte[] data_buffer;
         public int total_frames_written = 0;
         public int total_frames_read = 0;
+
+        ArrayBlockingQueue<byte[]> data_buffer = new ArrayBlockingQueue<byte[]>(50);
 
         int read_result = 0;
 
@@ -152,15 +110,17 @@ public class AudioSoftwarePoller {
             if (buffer_size < min_buffer_size)
                 buffer_size = ((min_buffer_size / samples_per_frame) + 1) * samples_per_frame * 2;
 
-            data_buffer = new byte[samples_per_frame]; // filled directly by hardware
+            //data_buffer = new byte[samples_per_frame]; // filled directly by hardware
+            for(int x=0; x < 25; x++)
+                data_buffer.add(new byte[samples_per_frame]);
 
             AudioRecord audio_recorder;
             audio_recorder = new AudioRecord(
-                    MediaRecorder.AudioSource.MIC,         // source
+                    MediaRecorder.AudioSource.MIC,       // source
                     SAMPLE_RATE,                         // sample rate, hz
-                    CHANNEL_CONFIG,                         // channels
-                    AUDIO_FORMAT,                         // audio format
-                    buffer_size);                         // buffer size (bytes)
+                    CHANNEL_CONFIG,                      // channels
+                    AUDIO_FORMAT,                        // audio format
+                    buffer_size);                        // buffer size (bytes)
 
 
             audio_recorder.startRecording();
@@ -170,7 +130,14 @@ public class AudioSoftwarePoller {
             while (is_recording) {
                 //read_result = audio_recorder.read(data_buffer, buffer_write_index, samples_per_frame);
                 audioPresentationTimeNs = System.nanoTime();
-                read_result = audio_recorder.read(data_buffer, 0, samples_per_frame);
+                byte[] this_buffer;
+                if(data_buffer.isEmpty()){
+                    this_buffer = new byte[samples_per_frame];
+                    Log.i(TAG, "Audio buffer empty. added new buffer");
+                }else{
+                    this_buffer = data_buffer.poll();
+                }
+                read_result = audio_recorder.read(this_buffer, 0, samples_per_frame);
                 if (VERBOSE)
                     Log.i("AudioSoftwarePoller-FillBuffer", String.valueOf(buffer_write_index) + " - " + String.valueOf(buffer_write_index + samples_per_frame - 1));
                 if(read_result == AudioRecord.ERROR_BAD_VALUE || read_result == AudioRecord.ERROR_INVALID_OPERATION)
@@ -178,7 +145,7 @@ public class AudioSoftwarePoller {
                 //buffer_write_index = (buffer_write_index + samples_per_frame) % buffer_size;
                 total_frames_written++;
                 if(avcEncoder != null){
-                    avcEncoder.offerAudioEncoder(data_buffer.clone(), audioPresentationTimeNs);
+                    avcEncoder.offerAudioEncoder(this_buffer, audioPresentationTimeNs);
                 }
             }
             if (audio_recorder != null) {
