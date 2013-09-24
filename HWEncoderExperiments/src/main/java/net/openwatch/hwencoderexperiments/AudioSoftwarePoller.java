@@ -133,7 +133,7 @@ public class AudioSoftwarePoller {
                 byte[] this_buffer;
                 if(data_buffer.isEmpty()){
                     this_buffer = new byte[samples_per_frame];
-                    Log.i(TAG, "Audio buffer empty. added new buffer");
+                    //Log.i(TAG, "Audio buffer empty. added new buffer");
                 }else{
                     this_buffer = data_buffer.poll();
                 }

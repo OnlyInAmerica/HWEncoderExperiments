@@ -210,7 +210,7 @@ public class ChunkedAvcEncoder {
                 inputBuffer.put(input);
                 if(cameraActivity != null){
                     cameraActivity.mCamera.addCallbackBuffer(input);
-                    Log.i(TAG, "returned video buffer");
+                    //Log.i(TAG, "returned video buffer");
                 }
                 long presentationTimeUs = (presentationTimeNs - videoStartTime) / 1000;
                 //Log.i(TAG, "Attempt to set PTS: " + presentationTimeUs);
@@ -503,7 +503,7 @@ public class ChunkedAvcEncoder {
                 // prevent multiple execution of same task
                 is_initialized = false;
                 encodingServiceQueueLength -= 1;
-                Log.i(TAG, "EncodingService Queue length: " + encodingServiceQueueLength);
+                //Log.i(TAG, "EncodingService Queue length: " + encodingServiceQueueLength);
             } else {
                 Log.e(TAG, "run() called but EncoderTask not initialized");
             }
