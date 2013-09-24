@@ -58,6 +58,7 @@ public class ChunkedAvcEncoder {
     private ExecutorService encodingService = Executors.newSingleThreadExecutor(); // re-use encodingService
 
     AudioSoftwarePoller audioSoftwarePoller;
+    HWRecorderActivity cameraActivity;
 
     public ChunkedAvcEncoder(Context c) {
         this.c = c;
@@ -66,6 +67,10 @@ public class ChunkedAvcEncoder {
 
     public void setAudioSoftwarePoller(AudioSoftwarePoller audioSoftwarePoller){
         this.audioSoftwarePoller = audioSoftwarePoller;
+    }
+
+    public void setCameraActivity(HWRecorderActivity cameraActivity){
+        this.cameraActivity = cameraActivity;
     }
 
     private void prepare() {
@@ -203,6 +208,10 @@ public class ChunkedAvcEncoder {
                 ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
                 inputBuffer.clear();
                 inputBuffer.put(input);
+                if(cameraActivity != null){
+                    cameraActivity.mCamera.addCallbackBuffer(input);
+                    Log.i(TAG, "returned video buffer");
+                }
                 long presentationTimeUs = (presentationTimeNs - videoStartTime) / 1000;
                 //Log.i(TAG, "Attempt to set PTS: " + presentationTimeUs);
                 if (eosReceived) {
