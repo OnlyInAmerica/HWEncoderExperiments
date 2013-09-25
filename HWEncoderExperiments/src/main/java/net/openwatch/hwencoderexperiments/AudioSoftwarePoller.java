@@ -8,20 +8,16 @@ import android.util.Log;
 import java.util.concurrent.ArrayBlockingQueue;
 
 /*
- * This class polls audio from the microphone and fills a
- * circular buffer.
- *
- * Data is accessed by calling emptyBuffer(), which returns
- * all available unread samples. The output length is guaranteed to be a multiple of
- * recorderTask.samples_per_frame for convenient input to an audio encoder
+ * This class polls audio from the microphone and feeds an
+ * AudioEncoder. Audio buffers are recycled between this class and the AudioEncoder
  *
  * Usage:
  *
  * 1. AudioSoftwarePoller recorder = new AudioSoftwarePoller();
  * 1a (optional): recorder.setSamplesPerFrame(NUM_SAMPLES_PER_CODEC_FRAME)
+ * 2. recorder.setAudioEncoder(myAudioEncoder)
  * 2. recorder.startPolling();
- * 3. byte[] audio_data = recorder.emptyBuffer();
- * 4. recorder.stopPolling();
+ * 3. recorder.stopPolling();
  */
 public class AudioSoftwarePoller {
     public static final String TAG = "AudioSoftwarePoller";
@@ -34,14 +30,14 @@ public class AudioSoftwarePoller {
     final boolean VERBOSE = false;
     public RecorderTask recorderTask = new RecorderTask();
 
-    ChunkedAvcEncoder avcEncoder;
+    AudioEncoder audioEncoder;
 
     public AudioSoftwarePoller() {
     }
 
 
-    public void setChunkedAvcEncoder(ChunkedAvcEncoder avcEncoder) {
-        this.avcEncoder = avcEncoder;
+    public void setAudioEncoder(AudioEncoder avcEncoder) {
+        this.audioEncoder = avcEncoder;
     }
 
     /**
@@ -91,10 +87,8 @@ public class AudioSoftwarePoller {
         //public int samples_per_frame = 1024;    // codec-specific
         public int samples_per_frame = 2048;    // codec-specific
         public int buffer_write_index = 0;        // last buffer index written to
-        public int buffer_read_index = 0;        // first buffer index to read from
         //public byte[] data_buffer;
         public int total_frames_written = 0;
-        public int total_frames_read = 0;
 
         ArrayBlockingQueue<byte[]> data_buffer = new ArrayBlockingQueue<byte[]>(50);
 
@@ -144,8 +138,8 @@ public class AudioSoftwarePoller {
                     Log.e("AudioSoftwarePoller", "Read error");
                 //buffer_write_index = (buffer_write_index + samples_per_frame) % buffer_size;
                 total_frames_written++;
-                if(avcEncoder != null){
-                    avcEncoder.offerAudioEncoder(this_buffer, audioPresentationTimeNs);
+                if(audioEncoder != null){
+                    audioEncoder.offerAudioEncoder(this_buffer, audioPresentationTimeNs);
                 }
             }
             if (audio_recorder != null) {

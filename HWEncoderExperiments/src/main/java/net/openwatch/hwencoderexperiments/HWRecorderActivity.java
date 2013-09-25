@@ -1,51 +1,27 @@
 package net.openwatch.hwencoderexperiments;
 
 import android.app.Activity;
-import android.graphics.SurfaceTexture;
-import android.hardware.Camera;
 import android.os.Bundle;
 import android.util.Log;
-import android.view.SurfaceHolder;
-import android.view.SurfaceView;
-import android.view.TextureView;
 import android.view.View;
+import android.widget.Button;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.Date;
-import java.util.List;
-
-public class HWRecorderActivity extends Activity implements TextureView.SurfaceTextureListener, SurfaceHolder.Callback {
+public class HWRecorderActivity extends Activity {
     private static final String TAG = "CameraToMpegTest";
 
-    public Camera mCamera;
-    ChunkedAvcEncoder mEncoder;
-    MediaRecorderWrapper mMediaRecorderWrapper;
-    boolean recording = false;
-    int bufferSize = 460800; // 640x480
-    //int bufferSize = 1382400; // 720p
-    int numFramesPreviewed = 0;
+    AudioEncoder mEncoder;
     AudioSoftwarePoller audioPoller;
+    boolean recording = false;
 
-    // testing
-    long recordingStartTime = 0;
-    long recordingEndTime = 0;
-
-    boolean useTextureView = true;
+    Button recordButton;
 
     protected void onCreate (Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
-        if(useTextureView){
-            setContentView(R.layout.activity_hwrecorder_textureview);
-            TextureView tv = (TextureView) findViewById(R.id.cameraPreview);
-            tv.setSurfaceTextureListener(this);
-        }else{
-            setContentView(R.layout.activity_hwrecorder_surfaceview);
-            SurfaceView surfaceView = (SurfaceView) findViewById(R.id.cameraPreview);
-            surfaceView.getHolder().addCallback(this);
-        }
+        getActionBar().setTitle("");
+        setContentView(R.layout.activity_hwrecorder);
+        recordButton = (Button) findViewById(R.id.recordButton);
 
-        // testing
+        // test MediaCodec capabilities
         /*
         for(int i = MediaCodecList.getCodecCount() - 1; i >= 0; i--){
             MediaCodecInfo codecInfo = MediaCodecList.getCodecInfoAt(i);
@@ -63,7 +39,6 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
         */
     }
 
-    //static byte[] audioData;
 
     public void onRecordButtonClick(View v){
         recording = !recording;
@@ -71,45 +46,17 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
         Log.i(TAG, "Record button hit. Start: " + String.valueOf(recording));
 
         if(recording){
-            recordingStartTime = new Date().getTime();
+            recordButton.setText(R.string.stop_recording);
 
-            startMediaRecorder();
-            mEncoder = new ChunkedAvcEncoder(getApplicationContext());
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
-                @Override
-                public void onPreviewFrame(byte[] data, Camera camera) {
-                    if(!audioPoller.is_recording){
-                        mCamera.addCallbackBuffer(data);
-                        return;
-                    }
-                    numFramesPreviewed++;
-                    //Log.i(TAG, "Inter-frame time: " + (System.currentTimeMillis() - lastFrameTime) + " ms");
-                    mEncoder.offerVideoEncoder(data);
-                    //mCamera.addCallbackBuffer(data);
-                    if(!recording){ // One frame must be sent with EOS flag after stop requested
-                        camera.setPreviewCallbackWithBuffer(null);
-                        audioPoller.stopPolling();
-                        recordingEndTime = new Date().getTime();
-                        Log.i(TAG, "HWRecorderActivity saw #frames: " + numFramesPreviewed + " over " +  ((recordingEndTime - recordingStartTime) / 1000) + " s for " + (numFramesPreviewed / ((recordingEndTime - recordingStartTime) / 1000)) + " fps");
-                    }
-                }
-            });
+            mEncoder = new AudioEncoder(getApplicationContext());
             audioPoller = new AudioSoftwarePoller();
-            audioPoller.setChunkedAvcEncoder(mEncoder);
+            audioPoller.setAudioEncoder(mEncoder);
             mEncoder.setAudioSoftwarePoller(audioPoller);
-            mEncoder.setCameraActivity(this);
             audioPoller.startPolling();
         }else{
-            stopMediaRecorder();
+            recordButton.setText(R.string.start_recording);
             if(mEncoder != null){
+                audioPoller.stopPolling();
                 mEncoder.stop();
             }
         }
@@ -129,96 +76,5 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
         }
         return audioData;
 
-    }
-
-    private void setupCamera(){
-        Camera.Parameters parameters = mCamera.getParameters();
-        //List <Camera.Size> previewSizes = parameters.getSupportedPreviewSizes();
-        parameters.setPreviewSize(640, 480);
-        List<int[]> fpsRanges = parameters.getSupportedPreviewFpsRange();
-        int[] maxFpsRange = fpsRanges.get(fpsRanges.size() - 1);
-        parameters.setPreviewFpsRange(maxFpsRange[0], maxFpsRange[1]);
-        mCamera.setParameters(parameters);
-        mCamera.setDisplayOrientation(90);
-        mCamera.startPreview();
-
-    }
-
-    private void setupCameraWithSurfaceTexture(SurfaceTexture surface){
-        mCamera = Camera.open();
-        try {
-            mCamera.setPreviewTexture(surface);
-            setupCamera();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void setupCameraWithSurfaceHolder(SurfaceHolder surfaceHolder){
-        mCamera = Camera.open();
-        try {
-            mCamera.setPreviewDisplay(surfaceHolder);
-            setupCamera();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void stopCamera(){
-        mCamera.stopPreview();
-        mCamera.release();
-    }
-
-    private void startMediaRecorder(){
-        if(mMediaRecorderWrapper == null || !mMediaRecorderWrapper.isRecording){
-            File outputHq = FileUtils.createTempFileInRootAppStorage(getApplicationContext(), "hq.mp4");
-            mMediaRecorderWrapper = new MediaRecorderWrapper(getApplicationContext(), outputHq.getAbsolutePath(), mCamera);
-            mMediaRecorderWrapper.startRecording();
-        } else
-            Log.e(TAG, "MediaRecorderWrapper is already started");
-    }
-
-    private void stopMediaRecorder(){
-        if(mMediaRecorderWrapper != null && mMediaRecorderWrapper.isRecording){
-            mMediaRecorderWrapper.stopRecording();
-        }else
-            Log.e(TAG, "MediaRecorderWrapper is not recording");
-    }
-
-    @Override
-    public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-        setupCameraWithSurfaceTexture(surface);
-    }
-
-
-    @Override
-    public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
-
-    }
-
-    @Override
-    public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
-        stopCamera();
-        return false;
-    }
-
-    @Override
-    public void onSurfaceTextureUpdated(SurfaceTexture surface) {
-
-    }
-
-    @Override
-    public void surfaceCreated(SurfaceHolder holder) {
-        setupCameraWithSurfaceHolder(holder);
-    }
-
-    @Override
-    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-
-    }
-
-    @Override
-    public void surfaceDestroyed(SurfaceHolder holder) {
-        stopCamera();
     }
 }
