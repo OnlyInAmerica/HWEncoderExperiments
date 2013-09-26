@@ -57,9 +57,20 @@ public class ChunkedAvcEncoder {
     private MediaCodec.BufferInfo mAudioBufferInfo;
     private ExecutorService encodingService = Executors.newSingleThreadExecutor(); // re-use encodingService
 
+    AudioSoftwarePoller audioSoftwarePoller;
+    HWRecorderActivity cameraActivity;
+
     public ChunkedAvcEncoder(Context c) {
         this.c = c;
         prepare();
+    }
+
+    public void setAudioSoftwarePoller(AudioSoftwarePoller audioSoftwarePoller){
+        this.audioSoftwarePoller = audioSoftwarePoller;
+    }
+
+    public void setCameraActivity(HWRecorderActivity cameraActivity){
+        this.cameraActivity = cameraActivity;
     }
 
     private void prepare() {
@@ -196,10 +207,14 @@ public class ChunkedAvcEncoder {
             int inputBufferIndex = mVideoEncoder.dequeueInputBuffer(-1);
             if (inputBufferIndex >= 0) {
                 if(convertedInput == null) convertedInput = new byte[input.length];
-                input = YV12toYUV420PackedSemiPlanar(input, convertedInput, 640, 480);
+                YV12toYUV420PackedSemiPlanar(input, convertedInput, 640, 480);
                 ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
                 inputBuffer.clear();
                 inputBuffer.put(convertedInput);
+                if(cameraActivity != null){
+                    cameraActivity.mCamera.addCallbackBuffer(convertedInput);
+                    //Log.i(TAG, "returned video buffer");
+                }
                 long presentationTimeUs = (presentationTimeNs - videoStartTime) / 1000;
                 //Log.i(TAG, "Attempt to set PTS: " + presentationTimeUs);
                 if (eosReceived) {
@@ -269,6 +284,11 @@ public class ChunkedAvcEncoder {
                 ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
                 inputBuffer.clear();
                 inputBuffer.put(input);
+                if(audioSoftwarePoller != null){
+                    //audioSoftwarePoller.recycleInputBuffer(input);
+                    audioSoftwarePoller.recorderTask.data_buffer.offer(input);
+                    //Log.i(TAG, "returned audio buffer to poller");
+                }
                 long presentationTimeUs = (presentationTimeNs - audioStartTime) / 1000;
                 //Log.i(TAG, "sent " + input.length + " audio bytes to encod with pts " + presentationTimeUs);
                 //nextQueuedAudioPresentationTimeStampUs = getNextAudioQueuedPresentationTimeStampUs((presentationTimeNs - audioStartTime) / 1000, input.length);
@@ -306,7 +326,7 @@ public class ChunkedAvcEncoder {
      * not recording audio.
      */
     private void drainEncoder(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo, TrackIndex trackIndex, boolean endOfStream) {
-        final int TIMEOUT_USEC = 1000;
+        final int TIMEOUT_USEC = 100;
         if (VERBOSE) Log.d(TAG, "drainEncoder(" + endOfStream + ")");
         ByteBuffer[] encoderOutputBuffers = encoder.getOutputBuffers();
         while (true) {
@@ -505,6 +525,7 @@ public class ChunkedAvcEncoder {
                 // prevent multiple execution of same task
                 is_initialized = false;
                 encodingServiceQueueLength -= 1;
+                //Log.i(TAG, "EncodingService Queue length: " + encodingServiceQueueLength);
             } else {
                 Log.e(TAG, "run() called but EncoderTask not initialized");
             }

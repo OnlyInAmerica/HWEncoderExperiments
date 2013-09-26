@@ -19,7 +19,7 @@ import java.util.List;
 public class HWRecorderActivity extends Activity implements TextureView.SurfaceTextureListener, SurfaceHolder.Callback {
     private static final String TAG = "CameraToMpegTest";
 
-    Camera mCamera;
+    public Camera mCamera;
     ChunkedAvcEncoder mEncoder;
     MediaRecorderWrapper mMediaRecorderWrapper;
     boolean recording = false;
@@ -79,6 +79,11 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
             mCamera.addCallbackBuffer(new byte[bufferSize]);
             mCamera.addCallbackBuffer(new byte[bufferSize]);
             mCamera.addCallbackBuffer(new byte[bufferSize]);
+            mCamera.addCallbackBuffer(new byte[bufferSize]);
+            mCamera.addCallbackBuffer(new byte[bufferSize]);
+            mCamera.addCallbackBuffer(new byte[bufferSize]);
+            mCamera.addCallbackBuffer(new byte[bufferSize]);
+            mCamera.addCallbackBuffer(new byte[bufferSize]);
             mCamera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
                 @Override
                 public void onPreviewFrame(byte[] data, Camera camera) {
@@ -88,8 +93,8 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
                     }
                     numFramesPreviewed++;
                     //Log.i(TAG, "Inter-frame time: " + (System.currentTimeMillis() - lastFrameTime) + " ms");
-                    mEncoder.offerVideoEncoder(data.clone());
-                    mCamera.addCallbackBuffer(data);
+                    mEncoder.offerVideoEncoder(data);
+                    //mCamera.addCallbackBuffer(data);
                     if(!recording){ // One frame must be sent with EOS flag after stop requested
                         camera.setPreviewCallbackWithBuffer(null);
                         audioPoller.stopPolling();
@@ -98,7 +103,10 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
                     }
                 }
             });
-            audioPoller = new AudioSoftwarePoller(mEncoder);
+            audioPoller = new AudioSoftwarePoller();
+            audioPoller.setChunkedAvcEncoder(mEncoder);
+            mEncoder.setAudioSoftwarePoller(audioPoller);
+            mEncoder.setCameraActivity(this);
             audioPoller.startPolling();
         }else{
             stopMediaRecorder();
