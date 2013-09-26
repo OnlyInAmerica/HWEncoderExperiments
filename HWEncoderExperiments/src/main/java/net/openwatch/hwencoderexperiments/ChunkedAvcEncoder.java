@@ -166,6 +166,7 @@ public class ChunkedAvcEncoder {
 
     }
 
+    private static byte[] convertedInput;
     /**
      * Internal method called by encodingService
      *
@@ -194,9 +195,11 @@ public class ChunkedAvcEncoder {
             ByteBuffer[] inputBuffers = mVideoEncoder.getInputBuffers();
             int inputBufferIndex = mVideoEncoder.dequeueInputBuffer(-1);
             if (inputBufferIndex >= 0) {
+                if(convertedInput == null) convertedInput = new byte[input.length];
+                input = YV12toYUV420PackedSemiPlanar(input, convertedInput, 640, 480);
                 ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
                 inputBuffer.clear();
-                inputBuffer.put(input);
+                inputBuffer.put(convertedInput);
                 long presentationTimeUs = (presentationTimeNs - videoStartTime) / 1000;
                 //Log.i(TAG, "Attempt to set PTS: " + presentationTimeUs);
                 if (eosReceived) {
@@ -386,6 +389,25 @@ public class ChunkedAvcEncoder {
 
     private void logStatistics() {
         Log.i(TAG + "-Stats", "audio frames input: " + totalInputAudioFrameCount + " output: " + totalOutputAudioFrameCount);
+    }
+
+    // Thanks Albert!
+    // http://stackoverflow.com/questions/15739684/mediacodec-and-camera-color-space-incorrect
+    public static byte[] YV12toYUV420PackedSemiPlanar(final byte[] input, final byte[] output, final int width, final int height) {
+    /*
+     * COLOR_TI_FormatYUV420PackedSemiPlanar is NV12
+     * We convert by putting the corresponding U and V bytes together (interleaved).
+     */
+        final int frameSize = width * height;
+        final int qFrameSize = frameSize/4;
+
+        System.arraycopy(input, 0, output, 0, frameSize); // Y
+
+        for (int i = 0; i < qFrameSize; i++) {
+            output[frameSize + i*2] = input[frameSize + i + qFrameSize]; // Cb (U)
+            output[frameSize + i*2 + 1] = input[frameSize + i]; // Cr (V)
+        }
+        return output;
     }
 
     enum EncoderTaskType {

@@ -1,6 +1,7 @@
 package net.openwatch.hwencoderexperiments;
 
 import android.app.Activity;
+import android.graphics.ImageFormat;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.os.Bundle;
@@ -130,6 +131,7 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
         List<int[]> fpsRanges = parameters.getSupportedPreviewFpsRange();
         int[] maxFpsRange = fpsRanges.get(fpsRanges.size() - 1);
         parameters.setPreviewFpsRange(maxFpsRange[0], maxFpsRange[1]);
+        parameters.setPreviewFormat(ImageFormat.YV12);
         mCamera.setParameters(parameters);
         mCamera.setDisplayOrientation(90);
         mCamera.startPreview();
