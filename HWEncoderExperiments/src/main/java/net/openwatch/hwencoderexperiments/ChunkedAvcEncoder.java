@@ -207,12 +207,12 @@ public class ChunkedAvcEncoder {
             int inputBufferIndex = mVideoEncoder.dequeueInputBuffer(-1);
             if (inputBufferIndex >= 0) {
                 if(convertedInput == null) convertedInput = new byte[input.length];
-                YV12toYUV420PackedSemiPlanar(input, convertedInput, 640, 480);
+                convertedInput = YV12toYUV420PackedSemiPlanar(input, convertedInput, 640, 480);
                 ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
                 inputBuffer.clear();
                 inputBuffer.put(convertedInput);
                 if(cameraActivity != null){
-                    cameraActivity.mCamera.addCallbackBuffer(convertedInput);
+                    cameraActivity.mCamera.addCallbackBuffer(input);
                     //Log.i(TAG, "returned video buffer");
                 }
                 long presentationTimeUs = (presentationTimeNs - videoStartTime) / 1000;

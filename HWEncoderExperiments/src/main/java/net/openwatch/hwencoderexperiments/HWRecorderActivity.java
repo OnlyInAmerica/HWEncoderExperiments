@@ -32,7 +32,9 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
     long recordingStartTime = 0;
     long recordingEndTime = 0;
 
+    // options
     boolean useTextureView = true;
+    boolean useMediaRecorder = false;
 
     protected void onCreate (Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
@@ -74,7 +76,7 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
         if(recording){
             recordingStartTime = new Date().getTime();
 
-            startMediaRecorder();
+            if(useMediaRecorder) startMediaRecorder();
             mEncoder = new ChunkedAvcEncoder(getApplicationContext());
             mCamera.addCallbackBuffer(new byte[bufferSize]);
             mCamera.addCallbackBuffer(new byte[bufferSize]);
@@ -109,7 +111,7 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
             mEncoder.setCameraActivity(this);
             audioPoller.startPolling();
         }else{
-            stopMediaRecorder();
+            if(useMediaRecorder) stopMediaRecorder();
             if(mEncoder != null){
                 mEncoder.stop();
             }
