@@ -38,6 +38,7 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
 
     protected void onCreate (Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
+        getActionBar().setTitle("");
         if(useTextureView){
             setContentView(R.layout.activity_hwrecorder_textureview);
             TextureView tv = (TextureView) findViewById(R.id.cameraPreview);
@@ -74,6 +75,7 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
         Log.i(TAG, "Record button hit. Start: " + String.valueOf(recording));
 
         if(recording){
+            getActionBar().setTitle(R.string.recording);
             recordingStartTime = new Date().getTime();
 
             if(useMediaRecorder) startMediaRecorder();
@@ -111,6 +113,7 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
             mEncoder.setCameraActivity(this);
             audioPoller.startPolling();
         }else{
+            getActionBar().setTitle("");
             if(useMediaRecorder) stopMediaRecorder();
             if(mEncoder != null){
                 mEncoder.stop();
