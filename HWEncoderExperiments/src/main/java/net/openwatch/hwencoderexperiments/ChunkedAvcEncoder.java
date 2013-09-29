@@ -1,11 +1,14 @@
 package net.openwatch.hwencoderexperiments;
 
 import android.content.Context;
+import android.graphics.ImageFormat;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.media.MediaMuxer;
+import android.renderscript.*;
 import android.util.Log;
+import net.hwencoderexperiments.ChunkedAvcEncoder.ScriptC_colorconvert;
 
 import java.io.File;
 import java.io.IOException;
@@ -60,8 +63,15 @@ public class ChunkedAvcEncoder {
     AudioSoftwarePoller audioSoftwarePoller;
     HWRecorderActivity cameraActivity;
 
+    // Renderscript
+    private RenderScript mRS;
+    private Allocation mInAllocation;
+    private Allocation mOutAllocation;
+    private ScriptC_colorconvert mScript;
+
     public ChunkedAvcEncoder(Context c) {
         this.c = c;
+        setupRs();
         prepare();
     }
 
@@ -89,7 +99,8 @@ public class ChunkedAvcEncoder {
         videoFormat = MediaFormat.createVideoFormat(VIDEO_MIME_TYPE, 640, 480);
         videoFormat.setInteger(MediaFormat.KEY_BIT_RATE, 250000);
         videoFormat.setInteger(MediaFormat.KEY_FRAME_RATE, FRAMES_PER_SECOND);
-        videoFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_TI_FormatYUV420PackedSemiPlanar); // TODO: catch failure on createEncoderByType and try other color formats
+        //videoFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_TI_FormatYUV420PackedSemiPlanar); // TODO: catch failure on createEncoderByType and try other color formats
+        videoFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_Format32bitARGB8888);
         videoFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 5);
         //videoFormat.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 1382400);
 
@@ -178,6 +189,45 @@ public class ChunkedAvcEncoder {
     }
 
     private static byte[] convertedInput;
+    Allocation ain;
+    Allocation aOut;
+    ScriptIntrinsicYuvToRGB yuvToRGB;
+
+    private void setupRs() {
+        mRS = RenderScript.create(c);
+        //mScript = new ScriptC_colorconvert(mRS, c.getResources(), R.raw.colorconvert);
+        yuvToRGB = ScriptIntrinsicYuvToRGB.create(mRS, Element.U8_4(mRS));;
+
+        Type.Builder tb = new Type.Builder(mRS, Element.createPixel(mRS, Element.DataType.UNSIGNED_8, Element.DataKind.PIXEL_YUV));
+        tb.setX(640);
+        tb.setY(480);
+        tb.setMipmaps(false);
+        tb.setYuvFormat(ImageFormat.NV21);
+        ain = Allocation.createTyped(mRS, tb.create(), Allocation.USAGE_SCRIPT);
+
+        Type.Builder tb2 = new Type.Builder(mRS, Element.RGBA_8888(mRS));
+        tb2.setX(640);
+        tb2.setY(480);
+        tb2.setMipmaps(false);
+
+        aOut = Allocation.createTyped(mRS, tb2.create(), Allocation.USAGE_SCRIPT & Allocation.USAGE_SHARED);
+        //aOut.setSurface(null);
+    }
+
+    private void doRsConversion(byte[] input){
+        if(convertedInput == null) convertedInput = new byte[input.length];
+        /*
+        mInAllocation.copyFromUnchecked(input);
+        mOutAllocation.copyFromUnchecked(convertedInput);
+        mScript.forEach_root(mInAllocation, mOutAllocation);
+        mOutAllocation.copyTo(convertedInput);
+        */
+
+        ain.copyFrom(input);
+        yuvToRGB.setInput(ain);
+        yuvToRGB.forEach(aOut);
+        aOut.copyTo(convertedInput);
+    }
     /**
      * Internal method called by encodingService
      *
@@ -207,7 +257,8 @@ public class ChunkedAvcEncoder {
             int inputBufferIndex = mVideoEncoder.dequeueInputBuffer(-1);
             if (inputBufferIndex >= 0) {
                 if(convertedInput == null) convertedInput = new byte[input.length];
-                convertedInput = YV12toYUV420PackedSemiPlanar(input, convertedInput, 640, 480);
+                doRsConversion(input);
+                //convertedInput = YV12toYUV420PackedSemiPlanar(input, convertedInput, 640, 480);
                 ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
                 inputBuffer.clear();
                 inputBuffer.put(convertedInput);
