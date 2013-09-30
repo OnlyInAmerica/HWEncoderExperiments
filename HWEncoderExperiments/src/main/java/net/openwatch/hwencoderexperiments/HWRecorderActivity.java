@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.graphics.ImageFormat;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
+import android.media.MediaCodecInfo;
+import android.media.MediaCodecList;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.SurfaceHolder;
@@ -50,21 +52,24 @@ public class HWRecorderActivity extends Activity implements TextureView.SurfaceT
         }
 
         // testing
-        /*
+
         for(int i = MediaCodecList.getCodecCount() - 1; i >= 0; i--){
             MediaCodecInfo codecInfo = MediaCodecList.getCodecInfoAt(i);
             if(codecInfo.isEncoder()){
                 for(String t : codecInfo.getSupportedTypes()){
                     try{
-                        Log.i("CodecCapability", t);
-                        Log.i("CodecCapability", codecInfo.getCapabilitiesForType(t).toString());
+                        if(t.compareTo("video/avc") == 0){
+                            Log.i("CodecCapability", t);
+                            int[] colorFormats = codecInfo.getCapabilitiesForType(t).colorFormats;
+                            Log.i("CodecCapability-ColorFormats", codecInfo.getCapabilitiesForType(t).colorFormats.toString());
+                        }
                     } catch(IllegalArgumentException e){
                         e.printStackTrace();
                     }
                 }
             }
         }
-        */
+
     }
 
     //static byte[] audioData;
