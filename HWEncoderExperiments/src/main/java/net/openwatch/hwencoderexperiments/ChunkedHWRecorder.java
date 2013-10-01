@@ -33,6 +33,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+import java.util.List;
 
 /**
  * Record video from the camera preview and encode it as an MP4 file.  Demonstrates the use
@@ -93,6 +94,7 @@ public class ChunkedHWRecorder {
     private int currentChunk = 1;
     final int TOTAL_NUM_TRACKS = 1;
     int numTracksAdded = 0;
+    long startWhen;
 
 
     // Can't pass an int by reference in Java...
@@ -115,7 +117,7 @@ public class ChunkedHWRecorder {
             prepareSurfaceTexture();
 
             mCamera.startPreview();
-            long startWhen = System.nanoTime();
+            startWhen = System.nanoTime();
             SurfaceTexture st = mStManager.getSurfaceTexture();
             int frameCount = 0;
             recording = true;
@@ -233,6 +235,9 @@ public class ChunkedHWRecorder {
         }
 
         Camera.Parameters parms = mCamera.getParameters();
+        List<int[]> fpsRanges = parms.getSupportedPreviewFpsRange();
+        int[] maxFpsRange = fpsRanges.get(fpsRanges.size() - 1);
+        parms.setPreviewFpsRange(maxFpsRange[0], maxFpsRange[1]);
 
         choosePreviewSize(parms, encWidth, encHeight);
         // leave the frame rate set to default
@@ -350,13 +355,17 @@ public class ChunkedHWRecorder {
         mVideoEncoder.start();
         mInputSurface.makeCurrent();
         mStManager.signalSurfaceCreated();
+        startWhen = System.nanoTime();
     }
 
     private void resetMediaMuxer(String outputPath){
         if(mMuxer != null){
             mMuxer.stop();
             mMuxer.release();
+            mMuxerStarted = false;
+            numTracksAdded = 0;
         }
+
         try {
             mMuxer = new MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
         } catch (IOException ioe) {
@@ -499,6 +508,11 @@ public class ChunkedHWRecorder {
         private EGLSurface mEGLSurface = EGL14.EGL_NO_SURFACE;
         private Surface mSurface;
 
+        EGLConfig[] configs;
+        int[] surfaceAttribs = {
+                EGL14.EGL_NONE
+        };
+
         /**
          * Creates a CodecInputSurface from a Surface.
          */
@@ -513,10 +527,12 @@ public class ChunkedHWRecorder {
 
         public void updateSurface(Surface newSurface){
             // Destroy old EglSurface
-            release();
+            EGL14.eglDestroySurface(mEGLDisplay, mEGLSurface);
             mSurface = newSurface;
             // create new EglSurface
-            eglSetup();
+            mEGLSurface = EGL14.eglCreateWindowSurface(mEGLDisplay, configs[0], mSurface,
+                    surfaceAttribs, 0);
+            checkEglError("eglCreateWindowSurface");
             // eglMakeCurrent called in chunkRecording() after mVideoEncoder.start()
         }
 
@@ -543,7 +559,7 @@ public class ChunkedHWRecorder {
                     EGL_RECORDABLE_ANDROID, 1,
                     EGL14.EGL_NONE
             };
-            EGLConfig[] configs = new EGLConfig[1];
+            configs = new EGLConfig[1];
             int[] numConfigs = new int[1];
             EGL14.eglChooseConfig(mEGLDisplay, attribList, 0, configs, 0, configs.length,
                     numConfigs, 0);
@@ -559,9 +575,6 @@ public class ChunkedHWRecorder {
             checkEglError("eglCreateContext");
 
             // Create a window surface, and attach it to the Surface we received.
-            int[] surfaceAttribs = {
-                    EGL14.EGL_NONE
-            };
             mEGLSurface = EGL14.eglCreateWindowSurface(mEGLDisplay, configs[0], mSurface,
                     surfaceAttribs, 0);
             checkEglError("eglCreateWindowSurface");
