@@ -354,7 +354,7 @@ public class ChunkedHWRecorder {
         mInputSurface.updateSurface(mVideoEncoder.createInputSurface());
         mVideoEncoder.start();
         mInputSurface.makeCurrent();
-        mStManager.signalSurfaceCreated();
+        //mStManager.signalSurfaceCreated();
         startWhen = System.nanoTime();
     }
 
