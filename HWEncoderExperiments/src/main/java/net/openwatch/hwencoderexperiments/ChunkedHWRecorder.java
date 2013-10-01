@@ -28,7 +28,6 @@ import android.media.MediaMuxer;
 import android.opengl.*;
 import android.util.Log;
 import android.view.Surface;
-import android.view.View;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -95,17 +94,10 @@ public class ChunkedHWRecorder {
     final int TOTAL_NUM_TRACKS = 1;
     int numTracksAdded = 0;
 
+
     // Can't pass an int by reference in Java...
     class TrackIndex {
         int index = 0;
-    }
-
-    public void onRunTestButtonClicked(View v){
-        try {
-            testEncodeCameraToMp4();
-        } catch (Throwable throwable) {
-            throwable.printStackTrace();
-        }
     }
 
     public void startRecording(String outputDir){
@@ -208,88 +200,6 @@ public class ChunkedHWRecorder {
         Log.w(TAG, "Unable to set preview size to " + width + "x" + height);
         if (ppsfv != null) {
             parms.setPreviewSize(ppsfv.width, ppsfv.height);
-        }
-    }
-
-    /**
-     * test entry point
-     */
-    public void testEncodeCameraToMp4() throws Throwable {
-        CameraToMpegWrapper.runTest(this);
-    }
-
-    /**
-     * Tests encoding of AVC video from Camera input.  The output is saved as an MP4 file.
-     */
-    private void encodeCameraToMpeg() {
-        // arbitrary but popular values
-        int encWidth = 640;
-        int encHeight = 480;
-        int encBitRate = 6000000;      // Mbps
-        Log.d(TAG, MIME_TYPE + " output " + encWidth + "x" + encHeight + " @" + encBitRate);
-
-        try {
-            prepareCamera(encWidth, encHeight, Camera.CameraInfo.CAMERA_FACING_FRONT);
-            prepareEncoder(encWidth, encHeight, encBitRate);
-            mInputSurface.makeCurrent();
-            prepareSurfaceTexture();
-
-            mCamera.startPreview();
-
-            long startWhen = System.nanoTime();
-            long desiredEnd = startWhen + CHUNK_DURATION_SEC * 1000000000L;
-            SurfaceTexture st = mStManager.getSurfaceTexture();
-            int frameCount = 0;
-
-            while (System.nanoTime() < desiredEnd) {
-                // Feed any pending encoder output into the muxer.
-                drainEncoder(mVideoEncoder, mVideoBufferInfo, mVideoTrackIndex, false);
-
-                // Switch up the colors every 15 frames.  Besides demonstrating the use of
-                // fragment shaders for video editing, this provides a visual indication of
-                // the frame rate: if the camera is capturing at 15fps, the colors will change
-                // once per second.
-                if ((frameCount % 15) == 0) {
-                    String fragmentShader = null;
-                    if ((frameCount & 0x01) != 0) {
-                        fragmentShader = SWAPPED_FRAGMENT_SHADER;
-                    }
-                    mStManager.changeFragmentShader(fragmentShader);
-                }
-                frameCount++;
-
-                // Acquire a new frame of input, and render it to the Surface.  If we had a
-                // GLSurfaceView we could switch EGL contexts and call drawImage() a second
-                // time to render it on screen.  The texture can be shared between contexts by
-                // passing the GLSurfaceView's EGLContext as eglCreateContext()'s share_context
-                // argument.
-                mStManager.awaitNewImage();
-                mStManager.drawImage();
-
-                // Set the presentation time stamp from the SurfaceTexture's time stamp.  This
-                // will be used by MediaMuxer to set the PTS in the video.
-                if (VERBOSE) {
-                    Log.d(TAG, "present: " +
-                            ((st.getTimestamp() - startWhen) / 1000000.0) + "ms");
-                }
-                mInputSurface.setPresentationTime(st.getTimestamp());
-
-                // Submit it to the encoder.  The eglSwapBuffers call will block if the input
-                // is full, which would be bad if it stayed full until we dequeued an output
-                // buffer (which we can't do, since we're stuck here).  So long as we fully drain
-                // the encoder before supplying additional input, the system guarantees that we
-                // can supply another frame without blocking.
-                if (VERBOSE) Log.d(TAG, "sending frame to encoder");
-                mInputSurface.swapBuffers();
-            }
-
-            // send end-of-stream to encoder, and drain remaining output
-            drainEncoder(mVideoEncoder, mVideoBufferInfo, mVideoTrackIndex, true);
-        } finally {
-            // release everything we grabbed
-            releaseCamera();
-            releaseEncoder();
-            releaseSurfaceTexture();
         }
     }
 
@@ -422,10 +332,24 @@ public class ChunkedHWRecorder {
     }
 
     private void chunkRecording(){
-        mVideoEncoder.flush();
+        // Stop Encoder
+        if (mVideoEncoder != null) {
+            mVideoEncoder.stop();
+            mVideoEncoder.release();
+            mVideoEncoder = null;
+        }
+        // Stop + Start Muxer
         currentChunk++;
         String outputPath = OUTPUT_DIR + "chunktest." + VIDEO_WIDTH + "x" + VIDEO_HEIGHT + String.valueOf(currentChunk) + ".mp4";
         resetMediaMuxer(outputPath);
+
+        // Start Encoder
+        mVideoEncoder = MediaCodec.createEncoderByType(MIME_TYPE);
+        mVideoEncoder.configure(mVideoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+        mInputSurface.updateSurface(mVideoEncoder.createInputSurface());
+        mVideoEncoder.start();
+        mInputSurface.makeCurrent();
+        mStManager.signalSurfaceCreated();
     }
 
     private void resetMediaMuxer(String outputPath){
@@ -558,44 +482,6 @@ public class ChunkedHWRecorder {
         long endTime = System.nanoTime();
     }
 
-    /**
-     * Wraps encodeCameraToMpeg().  This is necessary because SurfaceTexture will try to use
-     * the looper in the current thread if one exists, and the CTS tests create one on the
-     * test thread.
-     * <p/>
-     * The wrapper propagates exceptions thrown by the worker thread back to the caller.
-     */
-    private static class CameraToMpegWrapper implements Runnable {
-        private Throwable mThrowable;
-        private ChunkedHWRecorder mTest;
-
-        private CameraToMpegWrapper(ChunkedHWRecorder test) {
-            mTest = test;
-        }
-
-        /**
-         * Entry point.
-         */
-        public static void runTest(ChunkedHWRecorder obj) throws Throwable {
-            CameraToMpegWrapper wrapper = new CameraToMpegWrapper(obj);
-            Thread th = new Thread(wrapper, "codec test");
-            th.start();
-            // When th.join() is called, blocks thread which catches onFrameAvailable
-            //th.join();
-            if (wrapper.mThrowable != null) {
-                throw wrapper.mThrowable;
-            }
-        }
-
-        @Override
-        public void run() {
-            try {
-                mTest.encodeCameraToMpeg();
-            } catch (Throwable th) {
-                mThrowable = th;
-            }
-        }
-    }
 
     /**
      * Holds state associated with a Surface used for MediaCodec encoder input.
@@ -623,6 +509,15 @@ public class ChunkedHWRecorder {
             mSurface = surface;
 
             eglSetup();
+        }
+
+        public void updateSurface(Surface newSurface){
+            // Destroy old EglSurface
+            release();
+            mSurface = newSurface;
+            // create new EglSurface
+            eglSetup();
+            // eglMakeCurrent called in chunkRecording() after mVideoEncoder.start()
         }
 
         /**
@@ -692,9 +587,9 @@ public class ChunkedHWRecorder {
             mEGLSurface = EGL14.EGL_NO_SURFACE;
 
             mSurface = null;
-        }
+         }
 
-        /**
+         /**
          * Makes our EGL context and surface current.
          */
         public void makeCurrent() {
@@ -767,6 +662,10 @@ public class ChunkedHWRecorder {
             mSurfaceTexture.setOnFrameAvailableListener(this);
         }
 
+        public void signalSurfaceCreated(){
+            mTextureRender.surfaceCreated();
+        }
+
         public void release() {
             // this causes a bunch of warnings that appear harmless but might confuse someone:
             //  W BufferQueue: [unnamed-3997-2] cancelBuffer: BufferQueue has been abandoned!
@@ -818,6 +717,7 @@ public class ChunkedHWRecorder {
             // Latch the data.
             mTextureRender.checkGlError("before updateTexImage");
             mSurfaceTexture.updateTexImage();
+
         }
 
         /**
