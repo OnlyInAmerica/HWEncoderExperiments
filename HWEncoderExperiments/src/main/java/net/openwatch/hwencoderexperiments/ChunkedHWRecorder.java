@@ -72,6 +72,8 @@ public class ChunkedHWRecorder {
                     "void main() {\n" +
                     "  gl_FragColor = texture2D(sTexture, vTextureCoord).gbra;\n" +
                     "}\n";
+    // Display Surface
+    private GLSurfaceView displaySurface;
     // encoder / muxer state
     private MediaCodec mVideoEncoder;
     private MediaCodec mAudioEncoder;
@@ -102,6 +104,14 @@ public class ChunkedHWRecorder {
         int index = 0;
     }
 
+    public void setDisplaySurface(GLSurfaceView displaySurface){
+        this.displaySurface = displaySurface;
+    }
+
+    public void setDisplayEGLContext(EGLContext context){
+        mInputSurface.mEGLDisplayContext = context;
+    }
+
     public void startRecording(String outputDir){
         if(outputDir != null)
             OUTPUT_DIR = outputDir;
@@ -113,7 +123,7 @@ public class ChunkedHWRecorder {
         try {
             prepareCamera(VIDEO_WIDTH, VIDEO_HEIGHT, Camera.CameraInfo.CAMERA_FACING_BACK);
             prepareEncoder(VIDEO_WIDTH, VIDEO_HEIGHT, encBitRate);
-            mInputSurface.makeCurrent();
+            mInputSurface.makeEncodeContextCurrent();
             prepareSurfaceTexture();
 
             mCamera.startPreview();
@@ -140,6 +150,9 @@ public class ChunkedHWRecorder {
                 // argument.
                 mStManager.awaitNewImage();
                 mStManager.drawImage();
+                mInputSurface.makeDisplayContextCurrent();
+                mStManager.drawImage();
+                mInputSurface.makeEncodeContextCurrent();
 
                 // Set the presentation time stamp from the SurfaceTexture's time stamp.  This
                 // will be used by MediaMuxer to set the PTS in the video.
@@ -353,8 +366,7 @@ public class ChunkedHWRecorder {
         mVideoEncoder.configure(mVideoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         mInputSurface.updateSurface(mVideoEncoder.createInputSurface());
         mVideoEncoder.start();
-        mInputSurface.makeCurrent();
-        //mStManager.signalSurfaceCreated();
+        mInputSurface.makeEncodeContextCurrent();
         startWhen = System.nanoTime();
     }
 
@@ -504,7 +516,8 @@ public class ChunkedHWRecorder {
     private static class CodecInputSurface {
         private static final int EGL_RECORDABLE_ANDROID = 0x3142;
         private EGLDisplay mEGLDisplay = EGL14.EGL_NO_DISPLAY;
-        private EGLContext mEGLContext = EGL14.EGL_NO_CONTEXT;
+        private EGLContext mEGLEncodeContext = EGL14.EGL_NO_CONTEXT;
+        public static EGLContext mEGLDisplayContext = EGL14.EGL_NO_CONTEXT;
         private EGLSurface mEGLSurface = EGL14.EGL_NO_SURFACE;
         private Surface mSurface;
 
@@ -570,7 +583,8 @@ public class ChunkedHWRecorder {
                     EGL14.EGL_CONTEXT_CLIENT_VERSION, 2,
                     EGL14.EGL_NONE
             };
-            mEGLContext = EGL14.eglCreateContext(mEGLDisplay, configs[0], EGL14.EGL_NO_CONTEXT,
+            if(mEGLDisplayContext == EGL14.EGL_NO_CONTEXT) Log.e(TAG, "mEGLDisplayContext not set properly");
+            mEGLEncodeContext = EGL14.eglCreateContext(mEGLDisplay, configs[0], EGL14.eglGetCurrentContext(),
                     attrib_list, 0);
             checkEglError("eglCreateContext");
 
@@ -589,24 +603,31 @@ public class ChunkedHWRecorder {
                 EGL14.eglMakeCurrent(mEGLDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE,
                         EGL14.EGL_NO_CONTEXT);
                 EGL14.eglDestroySurface(mEGLDisplay, mEGLSurface);
-                EGL14.eglDestroyContext(mEGLDisplay, mEGLContext);
+                EGL14.eglDestroyContext(mEGLDisplay, mEGLEncodeContext);
                 EGL14.eglReleaseThread();
                 EGL14.eglTerminate(mEGLDisplay);
             }
             mSurface.release();
 
             mEGLDisplay = EGL14.EGL_NO_DISPLAY;
-            mEGLContext = EGL14.EGL_NO_CONTEXT;
+            mEGLEncodeContext = EGL14.EGL_NO_CONTEXT;
             mEGLSurface = EGL14.EGL_NO_SURFACE;
 
             mSurface = null;
          }
 
+        public void makeDisplayContextCurrent(){
+            makeCurrent(mEGLDisplayContext);
+        }
+        public void makeEncodeContextCurrent(){
+            makeCurrent(mEGLEncodeContext);
+        }
+
          /**
          * Makes our EGL context and surface current.
          */
-        public void makeCurrent() {
-            EGL14.eglMakeCurrent(mEGLDisplay, mEGLSurface, mEGLSurface, mEGLContext);
+        private void makeCurrent(EGLContext context) {
+            EGL14.eglMakeCurrent(mEGLDisplay, mEGLSurface, mEGLSurface, context);
             checkEglError("eglMakeCurrent");
         }
 
@@ -673,10 +694,6 @@ public class ChunkedHWRecorder {
             // Java language note: passing "this" out of a constructor is generally unwise,
             // but we should be able to get away with it here.
             mSurfaceTexture.setOnFrameAvailableListener(this);
-        }
-
-        public void signalSurfaceCreated(){
-            mTextureRender.surfaceCreated();
         }
 
         public void release() {
