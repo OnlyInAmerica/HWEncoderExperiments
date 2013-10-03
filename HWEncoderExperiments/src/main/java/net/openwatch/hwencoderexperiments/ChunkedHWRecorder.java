@@ -21,10 +21,7 @@ package net.openwatch.hwencoderexperiments;
 
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
-import android.media.MediaCodec;
-import android.media.MediaCodecInfo;
-import android.media.MediaFormat;
-import android.media.MediaMuxer;
+import android.media.*;
 import android.opengl.*;
 import android.util.Log;
 import android.view.Surface;
@@ -57,7 +54,8 @@ public class ChunkedHWRecorder {
     // where to put the output file (note: /sdcard requires WRITE_EXTERNAL_STORAGE permission)
     private static String OUTPUT_DIR = "/sdcard/HWEncodingExperiments/";
     // parameters for the encoder
-    private static final String MIME_TYPE = "video/avc";    // H.264 Advanced Video Coding
+    private static final String VIDEO_MIME_TYPE = "video/avc";    // H.264 Advanced Video Coding
+    private static final String AUDIO_MIME_TYPE = "audio/mp4a-latm";    // H.264 Advanced Video Coding
     private static final int VIDEO_WIDTH = 640;
     private static final int VIDEO_HEIGHT = 480;
     private static final int FRAME_RATE = 30;               // 30fps
@@ -94,9 +92,19 @@ public class ChunkedHWRecorder {
     // recording state
     private boolean recording = false;
     private int currentChunk = 1;
-    final int TOTAL_NUM_TRACKS = 1;
+    final int TOTAL_NUM_TRACKS = 2;
     int numTracksAdded = 0;
     long startWhen;
+    int frameCount = 0;
+
+
+    // Audio
+    public static final int SAMPLE_RATE = 44100;
+    public static final int SAMPLES_PER_FRAME = 1024; // AAC
+    public static final int CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO;
+    public static final int AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT;
+    private AudioRecord audioRecord;
+    private long lastEncodedAudioTimeStamp = 0;
 
 
     // Can't pass an int by reference in Java...
@@ -118,28 +126,33 @@ public class ChunkedHWRecorder {
 
         int encBitRate = 6000000;      // Mbps
         int framesPerChunk = (int) CHUNK_DURATION_SEC * FRAME_RATE;
-        Log.d(TAG, MIME_TYPE + " output " + VIDEO_WIDTH + "x" + VIDEO_HEIGHT + " @" + encBitRate);
+        Log.d(TAG, VIDEO_MIME_TYPE + " output " + VIDEO_WIDTH + "x" + VIDEO_HEIGHT + " @" + encBitRate);
 
         try {
             prepareCamera(VIDEO_WIDTH, VIDEO_HEIGHT, Camera.CameraInfo.CAMERA_FACING_BACK);
             prepareEncoder(VIDEO_WIDTH, VIDEO_HEIGHT, encBitRate);
+            setupAudioRecord();
+            startAudioRecord();
             mInputSurface.makeEncodeContextCurrent();
             prepareSurfaceTexture();
 
             mCamera.startPreview();
             startWhen = System.nanoTime();
             SurfaceTexture st = mStManager.getSurfaceTexture();
-            int frameCount = 0;
             recording = true;
+            boolean isEOS = false;
             while (recording) {
                 // Feed any pending encoder output into the muxer.
                 // Chunk encoding
-                if ((frameCount % framesPerChunk) == 0 && frameCount != 0){
-                    Log.i(TAG, "Chunk du jour");
-                    drainEncoder(mVideoEncoder, mVideoBufferInfo, mVideoTrackIndex, true);
-                    chunkRecording();
-                }else
-                    drainEncoder(mVideoEncoder, mVideoBufferInfo, mVideoTrackIndex, false);
+                isEOS = ((frameCount % framesPerChunk) == 0 && frameCount != 0);
+                drainEncoder(mVideoEncoder, mVideoBufferInfo, mVideoTrackIndex, isEOS);
+                if (isEOS){
+                    Log.i(TAG, "Chunking...");
+                    mAudioEncoder.queueInputBuffer(0, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                    sendAudioToEncoder(true);
+                }
+                drainEncoder(mAudioEncoder, mAudioBufferInfo, mAudioTrackIndex, isEOS);
+                if (isEOS) chunkRecording();
 
                 frameCount++;
 
@@ -150,15 +163,18 @@ public class ChunkedHWRecorder {
                 // argument.
                 mStManager.awaitNewImage();
                 mStManager.drawImage();
+                /*
                 mInputSurface.makeDisplayContextCurrent();
                 mStManager.drawImage();
                 mInputSurface.makeEncodeContextCurrent();
+                */
 
                 // Set the presentation time stamp from the SurfaceTexture's time stamp.  This
                 // will be used by MediaMuxer to set the PTS in the video.
                 if (VERBOSE) {
-                    Log.d(TAG, "present: " +
+                    Log.d(TAG, "video present: " +
                             ((st.getTimestamp() - startWhen) / 1000000.0) + "ms");
+
                 }
                 mInputSurface.setPresentationTime(st.getTimestamp());
 
@@ -169,6 +185,8 @@ public class ChunkedHWRecorder {
                 // can supply another frame without blocking.
                 if (VERBOSE) Log.d(TAG, "sending frame to encoder");
                 mInputSurface.swapBuffers();
+
+                if(!isEOS) sendAudioToEncoder(false);
             }
 
             // send end-of-stream to encoder, and drain remaining output
@@ -187,7 +205,59 @@ public class ChunkedHWRecorder {
 
     public void stopRecording(){
         recording = false;
+        if(audioRecord != null) audioRecord.stop();
     }
+
+    private void setupAudioRecord(){
+        int min_buffer_size = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT);
+        int buffer_size = SAMPLES_PER_FRAME * 10;
+        if (buffer_size < min_buffer_size)
+            buffer_size = ((min_buffer_size / SAMPLES_PER_FRAME) + 1) * SAMPLES_PER_FRAME * 2;
+
+        audioRecord = new AudioRecord(
+                MediaRecorder.AudioSource.MIC,       // source
+                SAMPLE_RATE,                         // sample rate, hz
+                CHANNEL_CONFIG,                      // channels
+                AUDIO_FORMAT,                        // audio format
+                buffer_size);                        // buffer size (bytes)
+    }
+
+    private void startAudioRecord(){
+        if(audioRecord != null)
+            audioRecord.startRecording();
+    }
+
+    public void sendAudioToEncoder(boolean endOfStream) {
+        //if(!endOfStream)
+        //    drainEncoder(mAudioEncoder, mAudioBufferInfo, mAudioTrackIndex, endOfStream);
+        // send current frame data to encoder
+        try {
+            ByteBuffer[] inputBuffers = mAudioEncoder.getInputBuffers();
+            int inputBufferIndex = mAudioEncoder.dequeueInputBuffer(-1);
+            if (inputBufferIndex >= 0) {
+                ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
+                inputBuffer.clear();
+                long presentationTimeNs = System.nanoTime();
+                int inputLength =  audioRecord.read(inputBuffer, SAMPLES_PER_FRAME * 5);
+                if(inputLength == AudioRecord.ERROR_INVALID_OPERATION)
+                    Log.e(TAG, "Audio read error");
+
+                long presentationTimeUs = (presentationTimeNs - startWhen) / 1000;
+                Log.i(TAG, "queueing " + inputLength + " audio bytes with pts " + presentationTimeUs);
+                if (endOfStream) {
+                    Log.i(TAG, "EOS received in offerEncoder");
+                    mAudioEncoder.queueInputBuffer(inputBufferIndex, 0, inputLength, presentationTimeUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                    //drainEncoder(mAudioEncoder, mAudioBufferInfo, mAudioTrackIndex, endOfStream);
+                } else {
+                    mAudioEncoder.queueInputBuffer(inputBufferIndex, 0, inputLength, presentationTimeUs, 0);
+                }
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "_offerAudioEncoder exception");
+            t.printStackTrace();
+        }
+    }
+
 
     /**
      * Attempts to find a preview size that matches the provided width and height (which
@@ -307,7 +377,7 @@ public class ChunkedHWRecorder {
         mVideoBufferInfo = new MediaCodec.BufferInfo();
         mVideoTrackIndex = new TrackIndex();
 
-        mVideoFormat = MediaFormat.createVideoFormat(MIME_TYPE, width, height);
+        mVideoFormat = MediaFormat.createVideoFormat(VIDEO_MIME_TYPE, width, height);
 
         // Set some properties.  Failing to specify some of these can cause the MediaCodec
         // configure() call to throw an unhelpful exception.
@@ -325,10 +395,25 @@ public class ChunkedHWRecorder {
         // you will likely want to defer instantiation of CodecInputSurface until after the
         // "display" EGL context is created, then modify the eglCreateContext call to
         // take eglGetCurrentContext() as the share_context argument.
-        mVideoEncoder = MediaCodec.createEncoderByType(MIME_TYPE);
+        mVideoEncoder = MediaCodec.createEncoderByType(VIDEO_MIME_TYPE);
         mVideoEncoder.configure(mVideoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         mInputSurface = new CodecInputSurface(mVideoEncoder.createInputSurface());
         mVideoEncoder.start();
+
+        mAudioBufferInfo = new MediaCodec.BufferInfo();
+        mAudioTrackIndex = new TrackIndex();
+
+        mAudioFormat = new MediaFormat();
+        mAudioFormat.setString(MediaFormat.KEY_MIME, AUDIO_MIME_TYPE);
+        mAudioFormat.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
+        mAudioFormat.setInteger(MediaFormat.KEY_SAMPLE_RATE, 44100);
+        mAudioFormat.setInteger(MediaFormat.KEY_CHANNEL_COUNT, 1);
+        mAudioFormat.setInteger(MediaFormat.KEY_BIT_RATE, 128000);
+        mAudioFormat.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384);
+
+        mAudioEncoder = MediaCodec.createEncoderByType(AUDIO_MIME_TYPE);
+        mAudioEncoder.configure(mAudioFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+        mAudioEncoder.start();
 
         // Output filename.  Ideally this would use Context.getFilesDir() rather than a
         // hard-coded output directory.
@@ -350,23 +435,35 @@ public class ChunkedHWRecorder {
     }
 
     private void chunkRecording(){
+        frameCount = 0;
         // Stop Encoder
         if (mVideoEncoder != null) {
             mVideoEncoder.stop();
             mVideoEncoder.release();
             mVideoEncoder = null;
         }
+        if (mAudioEncoder != null) {
+            mAudioEncoder.stop();
+            mAudioEncoder.release();
+            mVideoEncoder = null;
+        }
+        //
         // Stop + Start Muxer
         currentChunk++;
         String outputPath = OUTPUT_DIR + "chunktest." + VIDEO_WIDTH + "x" + VIDEO_HEIGHT + String.valueOf(currentChunk) + ".mp4";
         resetMediaMuxer(outputPath);
 
         // Start Encoder
-        mVideoEncoder = MediaCodec.createEncoderByType(MIME_TYPE);
+        mVideoEncoder = MediaCodec.createEncoderByType(VIDEO_MIME_TYPE);
         mVideoEncoder.configure(mVideoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         mInputSurface.updateSurface(mVideoEncoder.createInputSurface());
         mVideoEncoder.start();
         mInputSurface.makeEncodeContextCurrent();
+
+        mAudioEncoder = MediaCodec.createEncoderByType(AUDIO_MIME_TYPE);
+        mAudioEncoder.configure(mAudioFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+        mAudioEncoder.start();
+
         startWhen = System.nanoTime();
     }
 
@@ -395,6 +492,11 @@ public class ChunkedHWRecorder {
             mVideoEncoder.release();
             mVideoEncoder = null;
         }
+        if (mAudioEncoder != null) {
+            mAudioEncoder.stop();
+            mAudioEncoder.release();
+            mAudioEncoder = null;
+        }
         if (mInputSurface != null) {
             mInputSurface.release();
             mInputSurface = null;
@@ -419,7 +521,7 @@ public class ChunkedHWRecorder {
     private void drainEncoder(MediaCodec encoder, MediaCodec.BufferInfo bufferInfo, TrackIndex trackIndex, boolean endOfStream) {
         final int TIMEOUT_USEC = 100;
         if (VERBOSE) Log.d(TAG, "drainEncoder(" + endOfStream + ")");
-        if (endOfStream) {
+        if (endOfStream && encoder == mVideoEncoder) {
             if (VERBOSE) Log.d(TAG, "sending EOS to encoder");
             encoder.signalEndOfInputStream();
         }
@@ -448,7 +550,7 @@ public class ChunkedHWRecorder {
                 // now that we have the Magic Goodies, start the muxer
                 trackIndex.index = mMuxer.addTrack(newFormat);
                 numTracksAdded++;
-                Log.d(TAG, "encoder output format changed: " + ((encoder == mVideoEncoder) ? mVideoFormat : mAudioFormat) + ". Added track index: " + trackIndex.index);
+                Log.d(TAG, "encoder output format changed: " + newFormat+ ". Added track index: " + trackIndex.index);
                 if (numTracksAdded == TOTAL_NUM_TRACKS) {
                     mMuxer.start();
                     mMuxerStarted = true;
@@ -466,7 +568,6 @@ public class ChunkedHWRecorder {
                             " was null");
                 }
 
-
                 if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
                     // The codec config data was pulled out and fed to the muxer when we got
                     // the INFO_OUTPUT_FORMAT_CHANGED status.  Ignore it.
@@ -483,6 +584,14 @@ public class ChunkedHWRecorder {
                     // adjust the ByteBuffer values to match BufferInfo (not needed?)
                     encodedData.position(bufferInfo.offset);
                     encodedData.limit(bufferInfo.offset + bufferInfo.size);
+                    if(encoder == mAudioEncoder){
+                        if(bufferInfo.presentationTimeUs < lastEncodedAudioTimeStamp)
+                            bufferInfo.presentationTimeUs = lastEncodedAudioTimeStamp += 23219; // Magical AAC encoded frame time
+                        lastEncodedAudioTimeStamp = bufferInfo.presentationTimeUs;
+                    }else if(encoder == mVideoEncoder){
+                        //Log.i(TAG, "Video-Audio timestamp offset: " + (bufferInfo.presentationTimeUs - lastEncodedAudioTimeStamp));
+                        bufferInfo.presentationTimeUs = bufferInfo.presentationTimeUs - 148120764978L;
+                    }
                     mMuxer.writeSampleData(trackIndex.index, encodedData, bufferInfo);
                     if (VERBOSE)
                         Log.d(TAG, "sent " + bufferInfo.size + ((encoder == mVideoEncoder) ? " video" : " audio") + " bytes to muxer with pts " + bufferInfo.presentationTimeUs);
