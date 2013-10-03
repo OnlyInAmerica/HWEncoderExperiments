@@ -17,26 +17,26 @@ public class HWRecorderActivity extends Activity {
     boolean recording = false;
     ChunkedHWRecorder chunkedHWRecorder;
 
-    GLSurfaceView glSurfaceView;
-    GlSurfaceViewRenderer glSurfaceViewRenderer = new GlSurfaceViewRenderer();
+    //GLSurfaceView glSurfaceView;
+    //GlSurfaceViewRenderer glSurfaceViewRenderer = new GlSurfaceViewRenderer();
 
     protected void onCreate (Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_hwrecorder);
-        glSurfaceView = (GLSurfaceView) findViewById(R.id.glSurfaceView);
-        glSurfaceView.setRenderer(glSurfaceViewRenderer);
+        //glSurfaceView = (GLSurfaceView) findViewById(R.id.glSurfaceView);
+        //glSurfaceView.setRenderer(glSurfaceViewRenderer);
     }
 
     @Override
     public void onPause(){
         super.onPause();
-        glSurfaceView.onPause();
+        //glSurfaceView.onPause();
     }
 
     @Override
     public void onResume(){
         super.onResume();
-        glSurfaceView.onResume();
+        //glSurfaceView.onResume();
     }
 
     public void onRunTestButtonClicked(View v){
@@ -61,7 +61,8 @@ public class HWRecorderActivity extends Activity {
     public void startChunkedHWRecorder() throws Throwable {
         chunkedHWRecorder = new ChunkedHWRecorder();
         chunkedHWRecorder.setDisplayEGLContext(context);
-        ChunkedHWRecorderWrapper.runTest(chunkedHWRecorder);
+
+        ChunkedHWRecorderWrapper.runWithRecorder(chunkedHWRecorder);
     }
 
 
@@ -83,7 +84,7 @@ public class HWRecorderActivity extends Activity {
         /**
          * Entry point.
          */
-        public static void runTest(ChunkedHWRecorder obj) throws Throwable {
+        public static void runWithRecorder(ChunkedHWRecorder obj) throws Throwable {
             ChunkedHWRecorderWrapper wrapper = new ChunkedHWRecorderWrapper(obj);
             Thread th = new Thread(wrapper, "codec test");
             th.start();
