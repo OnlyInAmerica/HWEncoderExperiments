@@ -19,6 +19,7 @@
 
 package net.openwatch.hwencoderexperiments;
 
+import android.content.Context;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.media.*;
@@ -26,6 +27,7 @@ import android.opengl.*;
 import android.util.Log;
 import android.view.Surface;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -106,10 +108,19 @@ public class ChunkedHWRecorder {
     private AudioRecord audioRecord;
     private long lastEncodedAudioTimeStamp = 0;
 
+    // MediaRecorder
+    MediaRecorderWrapper mMediaRecorderWrapper;
+
+    Context c;
+
 
     // Can't pass an int by reference in Java...
     class TrackIndex {
         int index = 0;
+    }
+
+    public ChunkedHWRecorder(Context c){
+        this.c = c;
     }
 
     public void setDisplaySurface(GLSurfaceView displaySurface){
@@ -136,6 +147,10 @@ public class ChunkedHWRecorder {
             mInputSurface.makeEncodeContextCurrent();
             prepareSurfaceTexture();
 
+            File outputHq = FileUtils.createTempFileInRootAppStorage(c, "hq.mp4");
+            mMediaRecorderWrapper = new MediaRecorderWrapper(c, outputHq.getAbsolutePath(), mCamera);
+            mMediaRecorderWrapper.startRecording();
+
             mCamera.startPreview();
             startWhen = System.nanoTime();
             SurfaceTexture st = mStManager.getSurfaceTexture();
@@ -148,7 +163,6 @@ public class ChunkedHWRecorder {
                 drainEncoder(mVideoEncoder, mVideoBufferInfo, mVideoTrackIndex, isEOS);
                 if (isEOS){
                     Log.i(TAG, "Chunking...");
-                    mAudioEncoder.queueInputBuffer(0, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
                     sendAudioToEncoder(true);
                 }
                 drainEncoder(mAudioEncoder, mAudioBufferInfo, mAudioTrackIndex, isEOS);
@@ -188,9 +202,12 @@ public class ChunkedHWRecorder {
 
                 if(!isEOS) sendAudioToEncoder(false);
             }
+            mMediaRecorderWrapper.stopRecording();
 
             // send end-of-stream to encoder, and drain remaining output
             drainEncoder(mVideoEncoder, mVideoBufferInfo, mVideoTrackIndex, true);
+            drainEncoder(mAudioEncoder, mAudioBufferInfo, mAudioTrackIndex, isEOS);
+            sendAudioToEncoder(true);
         } catch (Exception e){
             Log.e(TAG, "Encoding loop exception!");
             e.printStackTrace();
@@ -590,7 +607,8 @@ public class ChunkedHWRecorder {
                         lastEncodedAudioTimeStamp = bufferInfo.presentationTimeUs;
                     }else if(encoder == mVideoEncoder){
                         //Log.i(TAG, "Video-Audio timestamp offset: " + (bufferInfo.presentationTimeUs - lastEncodedAudioTimeStamp));
-                        bufferInfo.presentationTimeUs = bufferInfo.presentationTimeUs - 148120764978L;
+                        //bufferInfo.presentationTimeUs = (long) (frameCount * 33333);
+                        bufferInfo.presentationTimeUs = lastEncodedAudioTimeStamp;
                     }
                     mMuxer.writeSampleData(trackIndex.index, encodedData, bufferInfo);
                     if (VERBOSE)

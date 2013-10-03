@@ -59,7 +59,7 @@ public class HWRecorderActivity extends Activity {
      * test entry point
      */
     public void startChunkedHWRecorder() throws Throwable {
-        chunkedHWRecorder = new ChunkedHWRecorder();
+        chunkedHWRecorder = new ChunkedHWRecorder(getApplicationContext());
         chunkedHWRecorder.setDisplayEGLContext(context);
         ChunkedHWRecorderWrapper.runTest(chunkedHWRecorder);
     }
