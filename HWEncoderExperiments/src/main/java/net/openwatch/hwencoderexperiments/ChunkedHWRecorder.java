@@ -52,7 +52,7 @@ import java.util.List;
  */
 public class ChunkedHWRecorder {
     private static final String TAG = "CameraToMpegTest";
-    private static final boolean VERBOSE = true;           // lots of logging
+    private static final boolean VERBOSE = false;           // lots of logging
     // where to put the output file (note: /sdcard requires WRITE_EXTERNAL_STORAGE permission)
     private static String OUTPUT_DIR = "/sdcard/HWEncodingExperiments/";
     // parameters for the encoder
@@ -98,6 +98,7 @@ public class ChunkedHWRecorder {
     int numTracksAdded = 0;
     long startWhen;
     int frameCount = 0;
+    static long lastVideoFrameTimestamp = 0;
 
 
     // Audio
@@ -186,11 +187,12 @@ public class ChunkedHWRecorder {
                 // Set the presentation time stamp from the SurfaceTexture's time stamp.  This
                 // will be used by MediaMuxer to set the PTS in the video.
                 if (VERBOSE) {
-                    Log.d(TAG, "video present: " +
-                            ((st.getTimestamp() - startWhen) / 1000000.0) + "ms");
+                    //Log.d(TAG, "video present: " +
+                    //        ((st.getTimestamp() - startWhen) / 1000000.0) + "ms");
 
                 }
-                mInputSurface.setPresentationTime(st.getTimestamp());
+                mInputSurface.setPresentationTime(lastVideoFrameTimestamp);
+                //if(lastVideoFrameTimestamp - startWhen < 0) Log.e(TAG, "negative timestamp sent to mInputSurface!");
 
                 // Submit it to the encoder.  The eglSwapBuffers call will block if the input
                 // is full, which would be bad if it stayed full until we dequeued an output
@@ -200,7 +202,7 @@ public class ChunkedHWRecorder {
                 if (VERBOSE) Log.d(TAG, "sending frame to encoder");
                 mInputSurface.swapBuffers();
 
-                if(!isEOS) sendAudioToEncoder(false);
+                sendAudioToEncoder(false);
             }
             mMediaRecorderWrapper.stopRecording();
 
@@ -255,12 +257,13 @@ public class ChunkedHWRecorder {
                 ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
                 inputBuffer.clear();
                 long presentationTimeNs = System.nanoTime();
-                int inputLength =  audioRecord.read(inputBuffer, SAMPLES_PER_FRAME * 5);
+                int inputLength =  audioRecord.read(inputBuffer, SAMPLES_PER_FRAME * 3);
                 if(inputLength == AudioRecord.ERROR_INVALID_OPERATION)
                     Log.e(TAG, "Audio read error");
 
-                long presentationTimeUs = (presentationTimeNs - startWhen) / 1000;
-                Log.i(TAG, "queueing " + inputLength + " audio bytes with pts " + presentationTimeUs);
+                //long presentationTimeUs = (presentationTimeNs - startWhen) / 1000;
+                long presentationTimeUs = presentationTimeNs / 1000;
+                if (VERBOSE) Log.i(TAG, "queueing " + inputLength + " audio bytes with pts " + presentationTimeUs);
                 if (endOfStream) {
                     Log.i(TAG, "EOS received in offerEncoder");
                     mAudioEncoder.queueInputBuffer(inputBufferIndex, 0, inputLength, presentationTimeUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
@@ -447,11 +450,13 @@ public class ChunkedHWRecorder {
         resetMediaMuxer(outputPath);
 
         mVideoTrackIndex.index = -1;
-        //mAudioTrackIndex.index = -1;
+        mAudioTrackIndex.index = -1;
         mMuxerStarted = false;
     }
 
     private void chunkRecording(){
+        lastVideoFrameTimestamp = 0;
+        lastEncodedAudioTimeStamp = 0;
         frameCount = 0;
         // Stop Encoder
         if (mVideoEncoder != null) {
@@ -471,12 +476,16 @@ public class ChunkedHWRecorder {
         resetMediaMuxer(outputPath);
 
         // Start Encoder
+        mVideoBufferInfo = new MediaCodec.BufferInfo();
+        mVideoTrackIndex = new TrackIndex();
         mVideoEncoder = MediaCodec.createEncoderByType(VIDEO_MIME_TYPE);
         mVideoEncoder.configure(mVideoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         mInputSurface.updateSurface(mVideoEncoder.createInputSurface());
         mVideoEncoder.start();
         mInputSurface.makeEncodeContextCurrent();
 
+        mAudioBufferInfo = new MediaCodec.BufferInfo();
+        mAudioTrackIndex = new TrackIndex();
         mAudioEncoder = MediaCodec.createEncoderByType(AUDIO_MIME_TYPE);
         mAudioEncoder.configure(mAudioFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         mAudioEncoder.start();
@@ -571,9 +580,9 @@ public class ChunkedHWRecorder {
                 if (numTracksAdded == TOTAL_NUM_TRACKS) {
                     mMuxer.start();
                     mMuxerStarted = true;
-                    Log.i(TAG, "All tracks added. Muxer started");
-                }
-
+                    if (VERBOSE) Log.i(TAG, "All tracks added. Muxer started");
+                }else
+                    break;  // Allow both encoders to send output format changed before attempting to write samples
             } else if (encoderStatus < 0) {
                 Log.w(TAG, "unexpected result from encoder.dequeueOutputBuffer: " +
                         encoderStatus);
@@ -605,10 +614,9 @@ public class ChunkedHWRecorder {
                         if(bufferInfo.presentationTimeUs < lastEncodedAudioTimeStamp)
                             bufferInfo.presentationTimeUs = lastEncodedAudioTimeStamp += 23219; // Magical AAC encoded frame time
                         lastEncodedAudioTimeStamp = bufferInfo.presentationTimeUs;
-                    }else if(encoder == mVideoEncoder){
-                        //Log.i(TAG, "Video-Audio timestamp offset: " + (bufferInfo.presentationTimeUs - lastEncodedAudioTimeStamp));
-                        //bufferInfo.presentationTimeUs = (long) (frameCount * 33333);
-                        bufferInfo.presentationTimeUs = lastEncodedAudioTimeStamp;
+                    }
+                    if(bufferInfo.presentationTimeUs < 0){
+                        bufferInfo.presentationTimeUs = 0;
                     }
                     mMuxer.writeSampleData(trackIndex.index, encodedData, bufferInfo);
                     if (VERBOSE)
@@ -887,6 +895,7 @@ public class ChunkedHWRecorder {
         @Override
         public void onFrameAvailable(SurfaceTexture st) {
             if (VERBOSE) Log.d(TAG, "new frame available");
+            lastVideoFrameTimestamp = System.nanoTime();
             synchronized (mFrameSyncObject) {
                 if (mFrameAvailable) {
                     throw new RuntimeException("mFrameAvailable already set, frame could be dropped");
