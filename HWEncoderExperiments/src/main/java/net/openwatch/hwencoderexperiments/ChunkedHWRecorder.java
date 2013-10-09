@@ -24,6 +24,7 @@ import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.media.*;
 import android.opengl.*;
+import android.os.Trace;
 import android.util.Log;
 import android.view.Surface;
 
@@ -52,7 +53,8 @@ import java.util.List;
  */
 public class ChunkedHWRecorder {
     private static final String TAG = "CameraToMpegTest";
-    private static final boolean VERBOSE = false;           // lots of logging
+    private static final boolean VERBOSE = true;           // lots of logging
+    private static final boolean TRACE = true; // systrace
     // where to put the output file (note: /sdcard requires WRITE_EXTERNAL_STORAGE permission)
     private static String OUTPUT_DIR = "/sdcard/HWEncodingExperiments/";
     // parameters for the encoder
@@ -96,6 +98,7 @@ public class ChunkedHWRecorder {
     private int currentChunk = 1;
     final int TOTAL_NUM_TRACKS = 2;
     int numTracksAdded = 0;
+    int numTracksFinished = 0;
     long startWhen;
     int frameCount = 0;
     static long lastVideoFrameTimestamp = 0;
@@ -152,8 +155,8 @@ public class ChunkedHWRecorder {
             mMediaRecorderWrapper = new MediaRecorderWrapper(c, outputHq.getAbsolutePath(), mCamera);
             mMediaRecorderWrapper.startRecording();
 
-            mCamera.startPreview();
             startWhen = System.nanoTime();
+            mCamera.startPreview();
             SurfaceTexture st = mStManager.getSurfaceTexture();
             recording = true;
             boolean isEOS = false;
@@ -161,13 +164,19 @@ public class ChunkedHWRecorder {
                 // Feed any pending encoder output into the muxer.
                 // Chunk encoding
                 isEOS = ((frameCount % framesPerChunk) == 0 && frameCount != 0);
+                if (TRACE) Trace.beginSection("drainVideo");
                 drainEncoder(mVideoEncoder, mVideoBufferInfo, mVideoTrackIndex, isEOS);
+                if (TRACE) Trace.endSection();
                 if (isEOS){
                     Log.i(TAG, "Chunking...");
+                    if (TRACE) Trace.beginSection("sendAudio");
                     sendAudioToEncoder(true);
+                    if (TRACE) Trace.endSection();
                 }
+                if (TRACE) Trace.beginSection("drainAudio");
                 drainEncoder(mAudioEncoder, mAudioBufferInfo, mAudioTrackIndex, isEOS);
-                if (isEOS) chunkRecording();
+                if (TRACE) Trace.endSection();
+                if (isEOS){ Trace.beginSection("chunkRecording"); chunkRecording(); Trace.endSection();}
 
                 frameCount++;
 
@@ -176,8 +185,12 @@ public class ChunkedHWRecorder {
                 // time to render it on screen.  The texture can be shared between contexts by
                 // passing the GLSurfaceView's EGLContext as eglCreateContext()'s share_context
                 // argument.
+                if (TRACE) Trace.beginSection("awaitImage");
                 mStManager.awaitNewImage();
+                if (TRACE) Trace.endSection();
+                if (TRACE) Trace.beginSection("drawImage");
                 mStManager.drawImage();
+                if (TRACE) Trace.endSection();
                 /*
                 mInputSurface.makeDisplayContextCurrent();
                 mStManager.drawImage();
@@ -191,7 +204,7 @@ public class ChunkedHWRecorder {
                     //        ((st.getTimestamp() - startWhen) / 1000000.0) + "ms");
 
                 }
-                mInputSurface.setPresentationTime(lastVideoFrameTimestamp);
+                mInputSurface.setPresentationTime(lastVideoFrameTimestamp - startWhen);
                 //if(lastVideoFrameTimestamp - startWhen < 0) Log.e(TAG, "negative timestamp sent to mInputSurface!");
 
                 // Submit it to the encoder.  The eglSwapBuffers call will block if the input
@@ -200,16 +213,20 @@ public class ChunkedHWRecorder {
                 // the encoder before supplying additional input, the system guarantees that we
                 // can supply another frame without blocking.
                 if (VERBOSE) Log.d(TAG, "sending frame to encoder");
+                if (TRACE) Trace.beginSection("swapBuffers");
                 mInputSurface.swapBuffers();
+                if (TRACE) Trace.endSection();
 
+                if (TRACE) Trace.beginSection("sendAudio");
                 sendAudioToEncoder(false);
+                if (TRACE) Trace.endSection();
             }
             mMediaRecorderWrapper.stopRecording();
 
             // send end-of-stream to encoder, and drain remaining output
             drainEncoder(mVideoEncoder, mVideoBufferInfo, mVideoTrackIndex, true);
-            drainEncoder(mAudioEncoder, mAudioBufferInfo, mAudioTrackIndex, isEOS);
             sendAudioToEncoder(true);
+            drainEncoder(mAudioEncoder, mAudioBufferInfo, mAudioTrackIndex, true);
         } catch (Exception e){
             Log.e(TAG, "Encoding loop exception!");
             e.printStackTrace();
@@ -247,8 +264,6 @@ public class ChunkedHWRecorder {
     }
 
     public void sendAudioToEncoder(boolean endOfStream) {
-        //if(!endOfStream)
-        //    drainEncoder(mAudioEncoder, mAudioBufferInfo, mAudioTrackIndex, endOfStream);
         // send current frame data to encoder
         try {
             ByteBuffer[] inputBuffers = mAudioEncoder.getInputBuffers();
@@ -257,17 +272,17 @@ public class ChunkedHWRecorder {
                 ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
                 inputBuffer.clear();
                 long presentationTimeNs = System.nanoTime();
-                int inputLength =  audioRecord.read(inputBuffer, SAMPLES_PER_FRAME * 3);
+                int inputLength =  audioRecord.read(inputBuffer, SAMPLES_PER_FRAME * 5);
+                presentationTimeNs -= (inputLength / SAMPLE_RATE ) / 1000000000;
                 if(inputLength == AudioRecord.ERROR_INVALID_OPERATION)
                     Log.e(TAG, "Audio read error");
 
                 //long presentationTimeUs = (presentationTimeNs - startWhen) / 1000;
-                long presentationTimeUs = presentationTimeNs / 1000;
+                long presentationTimeUs = (presentationTimeNs - startWhen) / 1000;
                 if (VERBOSE) Log.i(TAG, "queueing " + inputLength + " audio bytes with pts " + presentationTimeUs);
                 if (endOfStream) {
-                    Log.i(TAG, "EOS received in offerEncoder");
+                    Log.i(TAG, "EOS received in sendAudioToEncoder");
                     mAudioEncoder.queueInputBuffer(inputBufferIndex, 0, inputLength, presentationTimeUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
-                    //drainEncoder(mAudioEncoder, mAudioBufferInfo, mAudioTrackIndex, endOfStream);
                 } else {
                     mAudioEncoder.queueInputBuffer(inputBufferIndex, 0, inputLength, presentationTimeUs, 0);
                 }
@@ -473,6 +488,7 @@ public class ChunkedHWRecorder {
         // Stop + Start Muxer
         currentChunk++;
         String outputPath = OUTPUT_DIR + "chunktest." + VIDEO_WIDTH + "x" + VIDEO_HEIGHT + String.valueOf(currentChunk) + ".mp4";
+        Log.i(TAG, "Preparing MediaMuxer at location: " + outputPath);
         resetMediaMuxer(outputPath);
 
         // Start Encoder
@@ -499,6 +515,7 @@ public class ChunkedHWRecorder {
             mMuxer.release();
             mMuxerStarted = false;
             numTracksAdded = 0;
+            numTracksFinished = 0;
         }
 
         try {
@@ -576,7 +593,7 @@ public class ChunkedHWRecorder {
                 // now that we have the Magic Goodies, start the muxer
                 trackIndex.index = mMuxer.addTrack(newFormat);
                 numTracksAdded++;
-                Log.d(TAG, "encoder output format changed: " + newFormat+ ". Added track index: " + trackIndex.index);
+                if (VERBOSE) Log.d(TAG, "encoder output format changed: " + newFormat+ ". Added track index: " + trackIndex.index);
                 if (numTracksAdded == TOTAL_NUM_TRACKS) {
                     mMuxer.start();
                     mMuxerStarted = true;
@@ -629,7 +646,8 @@ public class ChunkedHWRecorder {
                     if (!endOfStream) {
                         Log.w(TAG, "reached end of stream unexpectedly");
                     } else {
-                        if (VERBOSE) Log.d(TAG, "end of stream reached");
+                        numTracksFinished ++;
+                        if (VERBOSE) Log.d(TAG, "end of " + ((encoder == mVideoEncoder) ? " video" : " audio") + " stream reached. " + ((numTracksFinished == TOTAL_NUM_TRACKS) ? "ready to stop muxer" : ""));
                     }
                     break;      // out of while
                 }
