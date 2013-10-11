@@ -94,12 +94,15 @@ public class ChunkedHWRecorder {
     private int leadingChunk = 1;
     long startWhen;
     int frameCount = 0;
-    static long lastVideoFrameTimestamp = 0;
     boolean eosSentToAudioEncoder = false;
     boolean audioEosRequested = false;
     boolean eosSentToVideoEncoder = false;
     boolean fullStopReceived = false;
     boolean fullStopPerformed = false;
+
+    // debug state
+    int totalFrameCount = 0;
+    long startTime;
 
 
     // Audio
@@ -211,7 +214,7 @@ public class ChunkedHWRecorder {
         if(outputDir != null)
             OUTPUT_DIR = outputDir;
 
-        int encBitRate = 6000000;      // Mbps
+        int encBitRate = 1000000;      // bps
         int framesPerChunk = (int) CHUNK_DURATION_SEC * FRAME_RATE;
         Log.d(TAG, VIDEO_MIME_TYPE + " output " + VIDEO_WIDTH + "x" + VIDEO_HEIGHT + " @" + encBitRate);
 
@@ -232,6 +235,7 @@ public class ChunkedHWRecorder {
             mMediaRecorderWrapper.startRecording();
             if (TRACE) Trace.endSection();
             startWhen = System.nanoTime();
+
             mCamera.startPreview();
             SurfaceTexture st = mStManager.getSurfaceTexture();
             eosReceived = false;
@@ -263,6 +267,7 @@ public class ChunkedHWRecorder {
                 //if (eosReceived){ Trace.beginSection("chunkRecording"); chunkRecording(); Trace.endSection();}
 
                 frameCount++;
+                totalFrameCount++;
 
                 // Acquire a new frame of input, and render it to the Surface.  If we had a
                 // GLSurfaceView we could switch EGL contexts and call drawImage() a second
@@ -275,21 +280,11 @@ public class ChunkedHWRecorder {
                 if (TRACE) Trace.beginSection("drawImage");
                 mStManager.drawImage();
                 if (TRACE) Trace.endSection();
-                /*
-                mInputSurface.makeDisplayContextCurrent();
-                mStManager.drawImage();
-                mInputSurface.makeEncodeContextCurrent();
-                */
+
 
                 // Set the presentation time stamp from the SurfaceTexture's time stamp.  This
                 // will be used by MediaMuxer to set the PTS in the video.
-                if (VERBOSE) {
-                    //Log.d(TAG, "video present: " +
-                    //        ((st.getTimestamp() - startWhen) / 1000000.0) + "ms");
-
-                }
-                mInputSurface.setPresentationTime(lastVideoFrameTimestamp - startWhen);
-                //if(lastVideoFrameTimestamp - startWhen < 0) Log.e(TAG, "negative timestamp sent to mInputSurface!");
+                mInputSurface.setPresentationTime(st.getTimestamp() - startWhen);
 
                 // Submit it to the encoder.  The eglSwapBuffers call will block if the input
                 // is full, which would be bad if it stayed full until we dequeued an output
@@ -300,7 +295,9 @@ public class ChunkedHWRecorder {
                 if (TRACE) Trace.beginSection("swapBuffers");
                 mInputSurface.swapBuffers();
                 if (TRACE) Trace.endSection();
+                if (!firstFrameReady) startTime = System.nanoTime();
                 firstFrameReady = true;
+
                 /*
                 if (TRACE) Trace.beginSection("sendAudio");
                 sendAudioToEncoder(false);
@@ -340,6 +337,8 @@ public class ChunkedHWRecorder {
         Log.i(TAG, "stopRecording");
         fullStopReceived = true;
         mMediaRecorderWrapper.stopRecording();
+        double recordingDurationSec = (System.nanoTime() - startTime) / 1000000000.0;
+        Log.i(TAG, "Recorded " + recordingDurationSec + " s. Expected " + (FRAME_RATE * recordingDurationSec) + " frames. Got " + totalFrameCount);
     }
 
     /**
@@ -379,14 +378,13 @@ public class ChunkedHWRecorder {
                 @Override
                 public void run() {
                     audioRecord.startRecording();
-                    //while(!(fullStopReceived && eosSentToAudioEncoder)){
                     boolean audioEosRequestedCopy = false;
                     while(true){
 
                         if(!firstFrameReady)
                             continue;
                         audioEosRequestedCopy = audioEosRequested; // make sure audioEosRequested doesn't change value mid loop
-                        if (audioEosRequestedCopy || fullStopReceived){ // TODO post eosReceived message with Handler. For now assume frequency of audio calls is so great that it's guaranteed one will be called between video calls
+                        if (audioEosRequestedCopy || fullStopReceived){ // TODO post eosReceived message with Handler?
                             Log.i(TAG, "Audio loop caught audioEosRequested / fullStopReceived " + audioEosRequestedCopy + " " + fullStopReceived);
                             if (TRACE) Trace.beginSection("sendAudio");
                             sendAudioToEncoder(true);
@@ -403,13 +401,6 @@ public class ChunkedHWRecorder {
                             if (TRACE) Trace.endSection();
                         }
 
-                        /* do this in drainEncoder
-                        if ((audioEosRequested && !fullStopReceived) && eosSentToVideoEncoder && eosSentToAudioEncoder){
-                            Log.i(TAG, "ChunkRecording()");
-                            chunkRecording();
-                        }
-                        */
-
                         if (audioEosRequestedCopy) audioEosRequested = false;
 
                         if (!fullStopReceived){
@@ -420,15 +411,8 @@ public class ChunkedHWRecorder {
                             break;
                         }
                     } // end while
-                    /*
-                    Log.i(TAG, "Finalize Recording");
-                    if(!fullStopPerformed)
-                        _stopRecording();
-                    */
                 }
             }).start();
-
-
 
         }
 
@@ -443,7 +427,7 @@ public class ChunkedHWRecorder {
                 ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
                 inputBuffer.clear();
                 long presentationTimeNs = System.nanoTime();
-                int inputLength =  audioRecord.read(inputBuffer, SAMPLES_PER_FRAME * 2);
+                int inputLength =  audioRecord.read(inputBuffer, SAMPLES_PER_FRAME );
                 presentationTimeNs -= (inputLength / SAMPLE_RATE ) / 1000000000;
                 if(inputLength == AudioRecord.ERROR_INVALID_OPERATION)
                     Log.e(TAG, "Audio read error");
@@ -648,7 +632,6 @@ public class ChunkedHWRecorder {
     }
 
     private void stopAndReleaseVideoEncoder(){
-        lastVideoFrameTimestamp = 0;
         eosSentToVideoEncoder = false;
         frameCount = 0;
         if (mVideoEncoder != null) {
@@ -1181,7 +1164,6 @@ public class ChunkedHWRecorder {
         @Override
         public void onFrameAvailable(SurfaceTexture st) {
             if (VERBOSE) Log.d(TAG, "new frame available");
-            lastVideoFrameTimestamp = System.nanoTime();
             synchronized (mFrameSyncObject) {
                 if (mFrameAvailable) {
                     throw new RuntimeException("mFrameAvailable already set, frame could be dropped");
