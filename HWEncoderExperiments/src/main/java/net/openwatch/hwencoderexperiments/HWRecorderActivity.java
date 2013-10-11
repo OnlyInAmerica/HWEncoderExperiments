@@ -1,231 +1,126 @@
 package net.openwatch.hwencoderexperiments;
 
 import android.app.Activity;
-import android.graphics.ImageFormat;
-import android.graphics.SurfaceTexture;
-import android.hardware.Camera;
 import android.os.Bundle;
-import android.util.Log;
-import android.view.SurfaceHolder;
-import android.view.SurfaceView;
-import android.view.TextureView;
 import android.view.View;
+import android.widget.Button;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.Date;
-import java.util.List;
-
-public class HWRecorderActivity extends Activity implements TextureView.SurfaceTextureListener, SurfaceHolder.Callback {
+public class HWRecorderActivity extends Activity {
     private static final String TAG = "CameraToMpegTest";
-
-    public Camera mCamera;
-    ChunkedAvcEncoder mEncoder;
-    MediaRecorderWrapper mMediaRecorderWrapper;
     boolean recording = false;
-    int bufferSize = 460800; // 640x480
-    //int bufferSize = 1382400; // 720p
-    int numFramesPreviewed = 0;
-    AudioSoftwarePoller audioPoller;
+    ChunkedHWRecorder chunkedHWRecorder;
 
-    // testing
-    long recordingStartTime = 0;
-    long recordingEndTime = 0;
-
-    // options
-    boolean useTextureView = true;
-    boolean useMediaRecorder = false;
+    //GLSurfaceView glSurfaceView;
+    //GlSurfaceViewRenderer glSurfaceViewRenderer = new GlSurfaceViewRenderer();
 
     protected void onCreate (Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
-        getActionBar().setTitle("");
-        if(useTextureView){
-            setContentView(R.layout.activity_hwrecorder_textureview);
-            TextureView tv = (TextureView) findViewById(R.id.cameraPreview);
-            tv.setSurfaceTextureListener(this);
+        setContentView(R.layout.activity_hwrecorder);
+        //glSurfaceView = (GLSurfaceView) findViewById(R.id.glSurfaceView);
+        //glSurfaceView.setRenderer(glSurfaceViewRenderer);
+    }
+
+    @Override
+    public void onPause(){
+        super.onPause();
+        //glSurfaceView.onPause();
+    }
+
+    @Override
+    public void onResume(){
+        super.onResume();
+        //glSurfaceView.onResume();
+    }
+
+    public void onRunTestButtonClicked(View v){
+        if(!recording){
+            try {
+                startChunkedHWRecorder();
+                recording = true;
+                ((Button) v).setText("Stop Recording");
+            } catch (Throwable throwable) {
+                throwable.printStackTrace();
+            }
         }else{
-            setContentView(R.layout.activity_hwrecorder_surfaceview);
-            SurfaceView surfaceView = (SurfaceView) findViewById(R.id.cameraPreview);
-            surfaceView.getHolder().addCallback(this);
+            chunkedHWRecorder.stopRecording();
+            recording = false;
+            ((Button) v).setText("Start Recording");
         }
-
-        // testing
-        /*
-        for(int i = MediaCodecList.getCodecCount() - 1; i >= 0; i--){
-            MediaCodecInfo codecInfo = MediaCodecList.getCodecInfoAt(i);
-            if(codecInfo.isEncoder()){
-                for(String t : codecInfo.getSupportedTypes()){
-                    try{
-                        Log.i("CodecCapability", t);
-                        Log.i("CodecCapability", codecInfo.getCapabilitiesForType(t).toString());
-                    } catch(IllegalArgumentException e){
-                        e.printStackTrace();
-                    }
-                }
-            }
-        }
-        */
     }
 
-    //static byte[] audioData;
+    /**
+     * test entry point
+     */
+    public void startChunkedHWRecorder() throws Throwable {
+        chunkedHWRecorder = new ChunkedHWRecorder(getApplicationContext());
+        //chunkedHWRecorder.setDisplayEGLContext(context);
+        ChunkedHWRecorderWrapper.runTest(chunkedHWRecorder);
+    }
 
-    public void onRecordButtonClick(View v){
-        recording = !recording;
 
-        Log.i(TAG, "Record button hit. Start: " + String.valueOf(recording));
+    /**
+     * Wraps encodeCameraToMpeg().  This is necessary because SurfaceTexture will try to use
+     * the looper in the current thread if one exists, and the CTS tests create one on the
+     * test thread.
+     * <p/>
+     * The wrapper propagates exceptions thrown by the worker thread back to the caller.
+     */
+    private static class ChunkedHWRecorderWrapper implements Runnable {
+        private Throwable mThrowable;
+        private ChunkedHWRecorder chunkedHwRecorder;
 
-        if(recording){
-            getActionBar().setTitle(R.string.recording);
-            recordingStartTime = new Date().getTime();
+        private ChunkedHWRecorderWrapper(ChunkedHWRecorder recorder) {
+            chunkedHwRecorder = recorder;
+        }
 
-            if(useMediaRecorder) startMediaRecorder();
-            mEncoder = new ChunkedAvcEncoder(getApplicationContext());
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.addCallbackBuffer(new byte[bufferSize]);
-            mCamera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
-                @Override
-                public void onPreviewFrame(byte[] data, Camera camera) {
-                    if(!audioPoller.is_recording){
-                        mCamera.addCallbackBuffer(data);
-                        return;
-                    }
-                    numFramesPreviewed++;
-                    //Log.i(TAG, "Inter-frame time: " + (System.currentTimeMillis() - lastFrameTime) + " ms");
-                    mEncoder.offerVideoEncoder(data);
-                    //mCamera.addCallbackBuffer(data);
-                    if(!recording){ // One frame must be sent with EOS flag after stop requested
-                        camera.setPreviewCallbackWithBuffer(null);
-                        audioPoller.stopPolling();
-                        recordingEndTime = new Date().getTime();
-                        Log.i(TAG, "HWRecorderActivity saw #frames: " + numFramesPreviewed + " over " +  ((recordingEndTime - recordingStartTime) / 1000) + " s for " + (numFramesPreviewed / ((recordingEndTime - recordingStartTime) / 1000)) + " fps");
-                    }
-                }
-            });
-            audioPoller = new AudioSoftwarePoller();
-            audioPoller.setChunkedAvcEncoder(mEncoder);
-            mEncoder.setAudioSoftwarePoller(audioPoller);
-            mEncoder.setCameraActivity(this);
-            audioPoller.startPolling();
-        }else{
-            getActionBar().setTitle("");
-            if(useMediaRecorder) stopMediaRecorder();
-            if(mEncoder != null){
-                mEncoder.stop();
+        /**
+         * Entry point.
+         */
+        public static void runTest(ChunkedHWRecorder obj) throws Throwable {
+            ChunkedHWRecorderWrapper wrapper = new ChunkedHWRecorderWrapper(obj);
+            Thread th = new Thread(wrapper, "codec test");
+            th.start();
+            // When th.join() is called, blocks thread which catches onFrameAvailable
+            //th.join();
+            if (wrapper.mThrowable != null) {
+                throw wrapper.mThrowable;
             }
         }
 
-    }
-
-    static byte[] audioData;
-    private static byte[] getSimulatedAudioInput(){
-        int magnitude = 10;
-        if(audioData == null){
-            //audioData = new byte[1024];
-            audioData = new byte[1470]; // this is roughly equal to the audio expected between 30 fps frames
-            for(int x=0; x<audioData.length - 1; x++){
-                audioData[x] = (byte) (magnitude * Math.sin(x));
+        @Override
+        public void run() {
+            try {
+                chunkedHwRecorder.startRecording(null);
+            } catch (Throwable th) {
+                mThrowable = th;
             }
-            Log.i(TAG, "generated simulated audio data");
-        }
-        return audioData;
-
-    }
-
-    private void setupCamera(){
-        Camera.Parameters parameters = mCamera.getParameters();
-        //List <Camera.Size> previewSizes = parameters.getSupportedPreviewSizes();
-        parameters.setPreviewSize(640, 480);
-        List<int[]> fpsRanges = parameters.getSupportedPreviewFpsRange();
-        int[] maxFpsRange = fpsRanges.get(fpsRanges.size() - 1);
-        parameters.setPreviewFpsRange(maxFpsRange[0], maxFpsRange[1]);
-        parameters.setPreviewFormat(ImageFormat.YV12);
-        mCamera.setParameters(parameters);
-        mCamera.setDisplayOrientation(90);
-        mCamera.startPreview();
-
-    }
-
-    private void setupCameraWithSurfaceTexture(SurfaceTexture surface){
-        mCamera = Camera.open();
-        try {
-            mCamera.setPreviewTexture(surface);
-            setupCamera();
-        } catch (IOException e) {
-            e.printStackTrace();
         }
     }
 
-    private void setupCameraWithSurfaceHolder(SurfaceHolder surfaceHolder){
-        mCamera = Camera.open();
-        try {
-            mCamera.setPreviewDisplay(surfaceHolder);
-            setupCamera();
-        } catch (IOException e) {
-            e.printStackTrace();
+    /*
+    static EGLContext context;
+
+    public class GlSurfaceViewRenderer implements GLSurfaceView.Renderer{
+
+        @Override
+        public void onSurfaceCreated(GL10 gl, EGLConfig config) {
+            Log.i(TAG, "GLSurfaceView created");
+            context = EGL14.eglGetCurrentContext();
+            if(context == EGL14.EGL_NO_CONTEXT)
+                Log.e(TAG, "failed to get valid EGLContext");
+
+            EGL14.eglMakeCurrent(EGL14.eglGetCurrentDisplay(), EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT);
+        }
+
+        @Override
+        public void onSurfaceChanged(GL10 gl, int width, int height) {
+
+        }
+
+        @Override
+        public void onDrawFrame(GL10 gl) {
         }
     }
+    */
 
-    private void stopCamera(){
-        mCamera.stopPreview();
-        mCamera.release();
-    }
-
-    private void startMediaRecorder(){
-        if(mMediaRecorderWrapper == null || !mMediaRecorderWrapper.isRecording){
-            File outputHq = FileUtils.createTempFileInRootAppStorage(getApplicationContext(), "hq.mp4");
-            mMediaRecorderWrapper = new MediaRecorderWrapper(getApplicationContext(), outputHq.getAbsolutePath(), mCamera);
-            mMediaRecorderWrapper.startRecording();
-        } else
-            Log.e(TAG, "MediaRecorderWrapper is already started");
-    }
-
-    private void stopMediaRecorder(){
-        if(mMediaRecorderWrapper != null && mMediaRecorderWrapper.isRecording){
-            mMediaRecorderWrapper.stopRecording();
-        }else
-            Log.e(TAG, "MediaRecorderWrapper is not recording");
-    }
-
-    @Override
-    public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-        setupCameraWithSurfaceTexture(surface);
-    }
-
-
-    @Override
-    public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
-
-    }
-
-    @Override
-    public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
-        stopCamera();
-        return false;
-    }
-
-    @Override
-    public void onSurfaceTextureUpdated(SurfaceTexture surface) {
-
-    }
-
-    @Override
-    public void surfaceCreated(SurfaceHolder holder) {
-        setupCameraWithSurfaceHolder(holder);
-    }
-
-    @Override
-    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-
-    }
-
-    @Override
-    public void surfaceDestroyed(SurfaceHolder holder) {
-        stopCamera();
-    }
 }
