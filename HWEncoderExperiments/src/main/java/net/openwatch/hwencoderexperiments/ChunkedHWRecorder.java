@@ -114,6 +114,7 @@ public class ChunkedHWRecorder {
     private long lastEncodedAudioTimeStamp = 0;
 
     // MediaRecorder
+    boolean useMediaRecorder = false;
     MediaRecorderWrapper mMediaRecorderWrapper;
 
     Context c;
@@ -230,9 +231,9 @@ public class ChunkedHWRecorder {
 
             File outputHq = FileUtils.createTempFileInRootAppStorage(c, "hq.mp4");
             if (TRACE) Trace.beginSection("startMediaRecorder");
-            mMediaRecorderWrapper = new MediaRecorderWrapper(c, outputHq.getAbsolutePath(), mCamera);
+            if (useMediaRecorder) mMediaRecorderWrapper = new MediaRecorderWrapper(c, outputHq.getAbsolutePath(), mCamera);
             startAudioRecord();
-            mMediaRecorderWrapper.startRecording();
+            if (useMediaRecorder) mMediaRecorderWrapper.startRecording();
             if (TRACE) Trace.endSection();
             startWhen = System.nanoTime();
 
@@ -253,19 +254,7 @@ public class ChunkedHWRecorder {
                 }
                 if (fullStopReceived){
                     break;
-                    /*
-                    if (TRACE) Trace.beginSection("sendAudio");
-                    sendAudioToEncoder(true);
-                    if (TRACE) Trace.endSection();
-                    */
                 }
-                /*
-                if (TRACE) Trace.beginSection("drainAudio");
-                drainEncoder(mAudioEncoder, mAudioBufferInfo, mAudioTrackInfo, eosReceived);
-                if (TRACE) Trace.endSection();
-                */
-                //if (eosReceived){ Trace.beginSection("chunkRecording"); chunkRecording(); Trace.endSection();}
-
                 frameCount++;
                 totalFrameCount++;
 
@@ -305,40 +294,20 @@ public class ChunkedHWRecorder {
                 */
             }
             Log.i(TAG, "Exiting video encode loop");
-            /*
-            mMediaRecorderWrapper.stopRecording();
 
-            // send end-of-stream to encoder, and drain remaining output
-            drainEncoder(mVideoEncoder, mVideoBufferInfo, mVideoTrackInfo, true);
-            sendAudioToEncoder(true);
-            drainEncoder(mAudioEncoder, mAudioBufferInfo, mAudioTrackInfo, true);
-            */
         } catch (Exception e){
             Log.e(TAG, "Encoding loop exception!");
             e.printStackTrace();
         } finally {
-            /*
-            if(!fullStopPerformed){
-                _stopRecording();
-            }
-            */
-            //recording = false;
-            // release everything we grabbed
-            /*
-            releaseCamera();
-            releaseEncodersAndMuxer();
-            releaseSurfaceTexture();
-            */
-
         }
     }
 
     public void stopRecording(){
         Log.i(TAG, "stopRecording");
         fullStopReceived = true;
-        mMediaRecorderWrapper.stopRecording();
+        if (useMediaRecorder) mMediaRecorderWrapper.stopRecording();
         double recordingDurationSec = (System.nanoTime() - startTime) / 1000000000.0;
-        Log.i(TAG, "Recorded " + recordingDurationSec + " s. Expected " + (FRAME_RATE * recordingDurationSec) + " frames. Got " + totalFrameCount);
+        Log.i(TAG, "Recorded " + recordingDurationSec + " s. Expected " + (FRAME_RATE * recordingDurationSec) + " frames. Got " + totalFrameCount + " for " + (totalFrameCount / recordingDurationSec) + " fps");
     }
 
     /**
