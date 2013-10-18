@@ -1,45 +1,68 @@
 package net.openwatch.hwencoderexperiments;
 
 import android.app.Activity;
-import android.opengl.EGL14;
-import android.opengl.EGLContext;
-import android.opengl.GLSurfaceView;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
-import android.widget.Button;
-
-import javax.microedition.khronos.egl.EGLConfig;
-import javax.microedition.khronos.opengles.GL10;
+import net.openwatch.ffmpegwrapper.FFmpegWrapper;
 
 public class HWRecorderActivity extends Activity {
     private static final String TAG = "CameraToMpegTest";
     boolean recording = false;
     ChunkedHWRecorder chunkedHWRecorder;
+    FFmpegWrapper fFmpegWrapper;
 
-    GLSurfaceView glSurfaceView;
-    GlSurfaceViewRenderer glSurfaceViewRenderer = new GlSurfaceViewRenderer();
+    //GLSurfaceView glSurfaceView;
+    //GlSurfaceViewRenderer glSurfaceViewRenderer = new GlSurfaceViewRenderer();
 
     protected void onCreate (Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_hwrecorder);
-        glSurfaceView = (GLSurfaceView) findViewById(R.id.glSurfaceView);
-        glSurfaceView.setRenderer(glSurfaceViewRenderer);
+        //glSurfaceView = (GLSurfaceView) findViewById(R.id.glSurfaceView);
+        //glSurfaceView.setRenderer(glSurfaceViewRenderer);
+        fFmpegWrapper = new FFmpegWrapper();
     }
 
     @Override
     public void onPause(){
         super.onPause();
-        glSurfaceView.onPause();
+        //glSurfaceView.onPause();
     }
 
     @Override
     public void onResume(){
         super.onResume();
-        glSurfaceView.onResume();
+        //glSurfaceView.onResume();
     }
 
     public void onRunTestButtonClicked(View v){
+        // test JNI. ffmpegWrapper.test() returns 2
+        Log.i("JNI-TEST", String.valueOf(fFmpegWrapper.test()));
+
+        /*
+            Produces:   java.lang.IllegalStateException: Could not execute method of the activity
+            ...
+            Caused by: java.lang.UnsatisfiedLinkError: Native method not found: net.openwatch.ffmpegwrapper.FFmpegWrapper.test:()I
+            at net.openwatch.ffmpegwrapper.FFmpegWrapper.test(Native Method)
+            at net.openwatch.hwencoderexperiments.HWRecorderActivity.onRunTestButtonClicked(HWRecorderActivity.java:41)
+            at java.lang.reflect.Method.invokeNative(Native Method)
+            at java.lang.reflect.Method.invoke(Method.java:525)
+            at android.view.View$1.onClick(View.java:3628)
+            at android.view.View.performClick(View.java:4240)
+            at android.view.View$PerformClick.run(View.java:17721)
+            at android.os.Handler.handleCallback(Handler.java:730)
+            at android.os.Handler.dispatchMessage(Handler.java:92)
+            at android.os.Looper.loop(Looper.java:137)
+            at android.app.ActivityThread.main(ActivityThread.java:5103)
+            at java.lang.reflect.Method.invokeNative(Native Method)
+            at java.lang.reflect.Method.invoke(Method.java:525)
+            at com.android.internal.os.ZygoteInit$MethodAndArgsCaller.run(ZygoteInit.java:737)
+            at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:553)
+            at dalvik.system.NativeStart.main(Native Method)
+         */
+
+
+        /*
         if(!recording){
             try {
                 startChunkedHWRecorder();
@@ -53,6 +76,7 @@ public class HWRecorderActivity extends Activity {
             recording = false;
             ((Button) v).setText("Start Recording");
         }
+        */
     }
 
     /**
@@ -60,7 +84,7 @@ public class HWRecorderActivity extends Activity {
      */
     public void startChunkedHWRecorder() throws Throwable {
         chunkedHWRecorder = new ChunkedHWRecorder(getApplicationContext());
-        chunkedHWRecorder.setDisplayEGLContext(context);
+        //chunkedHWRecorder.setDisplayEGLContext(context);
         ChunkedHWRecorderWrapper.runTest(chunkedHWRecorder);
     }
 
@@ -104,6 +128,7 @@ public class HWRecorderActivity extends Activity {
         }
     }
 
+    /*
     static EGLContext context;
 
     public class GlSurfaceViewRenderer implements GLSurfaceView.Renderer{
@@ -127,5 +152,6 @@ public class HWRecorderActivity extends Activity {
         public void onDrawFrame(GL10 gl) {
         }
     }
+    */
 
 }
