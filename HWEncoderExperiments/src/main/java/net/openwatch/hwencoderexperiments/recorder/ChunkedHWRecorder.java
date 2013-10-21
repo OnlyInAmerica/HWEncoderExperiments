@@ -135,13 +135,13 @@ public class ChunkedHWRecorder {
     boolean eosReceived = false;
 
     public void startRecording(final String outputDir){
-        Thread th = new Thread(new Runnable(){
+        new Thread(new Runnable(){
 
             @Override
             public void run() {
                 _startRecording(outputDir);
             }
-        }, TAG);
+        }, TAG).start();
     }
 
     private void _startRecording(String outputDir){
