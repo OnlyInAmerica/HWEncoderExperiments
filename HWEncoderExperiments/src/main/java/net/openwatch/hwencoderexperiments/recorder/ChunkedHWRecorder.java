@@ -17,7 +17,7 @@
 // Enormous thanks to Andrew McFadden for his MediaCodec examples!
 // Adapted from http://bigflake.com/mediacodec/CameraToMpegTest.java.txt
 
-package net.openwatch.hwencoderexperiments;
+package net.openwatch.hwencoderexperiments.recorder;
 
 import android.content.Context;
 import android.graphics.SurfaceTexture;
@@ -27,6 +27,8 @@ import android.opengl.*;
 import android.os.Trace;
 import android.util.Log;
 import android.view.Surface;
+import net.openwatch.hwencoderexperiments.FileUtils;
+import net.openwatch.hwencoderexperiments.MediaRecorderWrapper;
 
 import java.io.File;
 import java.io.IOException;
@@ -36,23 +38,13 @@ import java.nio.FloatBuffer;
 import java.util.List;
 
 /**
- * Record video from the camera preview and encode it as an MP4 file.  Demonstrates the use
- * of MediaMuxer and MediaCodec with Camera input.  Does not record audio.
- * <p/>
- * Generally speaking, it's better to use MediaRecorder for this sort of thing.  This example
- * demonstrates one possible advantage: editing of video as it's being encoded.  A GLES 2.0
- * fragment shader is used to perform a silly color tweak every 15 frames.
- * <p/>
- * This uses various features first available in Android "Jellybean" 4.3 (API 18).  There is
- * no equivalent functionality in previous releases.  (You can send the Camera preview to a
- * byte buffer with a fully-specified format, but MediaCodec encoders want different input
- * formats on different devices, and this use case wasn't well exercised in CTS pre-4.3.)
- * <p/>
- * (This was derived from bits and pieces of CTS tests, and is packaged as such, but is not
- * currently part of CTS.)
+ * Records video in gapless chunks of fixed duration.
+ *
+ * This was derived from Andrew McFadden's MediaCodec examples:
+ * http://bigflake.com/mediacodec
  */
 public class ChunkedHWRecorder {
-    private static final String TAG = "CameraToMpegTest";
+    private static final String TAG = "ChunkedHWRecorder";
     private static final boolean VERBOSE = false;           // lots of logging
     private static final boolean TRACE = true; // systrace
     // where to put the output file (note: /sdcard requires WRITE_EXTERNAL_STORAGE permission)
@@ -125,77 +117,7 @@ public class ChunkedHWRecorder {
         MediaMuxerWrapper muxerWrapper;
     }
 
-    class MediaMuxerWrapper {
-        MediaMuxer muxer;
-        final int TOTAL_NUM_TRACKS = 2;
-        boolean started = false;
-        int chunk;
-        int numTracksAdded = 0;
-        int numTracksFinished = 0;
 
-        Object sync = new Object();
-
-        public MediaMuxerWrapper(int format, int chunk){
-            this.chunk = chunk;
-            restart(format, chunk);
-        }
-
-        public int addTrack(MediaFormat format){
-            numTracksAdded++;
-            int trackIndex = muxer.addTrack(format);
-            if(numTracksAdded == TOTAL_NUM_TRACKS){
-                if (VERBOSE) Log.i(TAG, "All tracks added, starting " + ((this == mMuxerWrapper) ? "muxer1" : "muxer2") +"!");
-                muxer.start();
-                started = true;
-            }
-            return trackIndex;
-        }
-
-        public void finishTrack(){
-            numTracksFinished++;
-            if(numTracksFinished == TOTAL_NUM_TRACKS){
-                if (VERBOSE) Log.i(TAG, "All tracks finished, stopping " + ((this == mMuxerWrapper) ? "muxer1" : "muxer2") + "!");
-                stop();
-            }
-
-        }
-
-        public boolean allTracksAdded(){
-            return (numTracksAdded == TOTAL_NUM_TRACKS);
-        }
-
-        public boolean allTracksFinished(){
-            return (numTracksFinished == TOTAL_NUM_TRACKS);
-        }
-
-
-        public void stop(){
-            if(muxer != null){
-                if(!allTracksFinished()) Log.e(TAG, "Stopping Muxer before all tracks added!");
-                if(!started) Log.e(TAG, "Stopping Muxer before it was started");
-                muxer.stop();
-                muxer.release();
-                muxer = null;
-                started = false;
-                chunk = 0;
-                numTracksAdded = 0;
-                numTracksFinished = 0;
-            }
-        }
-
-        private String outputPathForChunk(int chunk){
-            return OUTPUT_DIR + VIDEO_WIDTH + "x" + VIDEO_HEIGHT + "_" + chunk + ".mp4";
-        }
-
-        private void restart(int format, int chunk){
-            stop();
-            try {
-                muxer = new MediaMuxer(outputPathForChunk(chunk), format);
-            } catch (IOException e) {
-                throw new RuntimeException("MediaMuxer creation failed", e);
-            }
-        }
-    }
 
     public ChunkedHWRecorder(Context c){
         this.c = c;
@@ -211,7 +133,18 @@ public class ChunkedHWRecorder {
 
     boolean firstFrameReady = false;
     boolean eosReceived = false;
-    public void startRecording(String outputDir){
+
+    public void startRecording(final String outputDir){
+        Thread th = new Thread(new Runnable(){
+
+            @Override
+            public void run() {
+                _startRecording(outputDir);
+            }
+        }, TAG);
+    }
+
+    private void _startRecording(String outputDir){
         if(outputDir != null)
             OUTPUT_DIR = outputDir;
 
@@ -589,9 +522,9 @@ public class ChunkedHWRecorder {
         //
         // We're not actually interested in multiplexing audio.  We just want to convert
         // the raw H.264 elementary stream we get from MediaCodec into a .mp4 file.
-        //resetMediaMuxer(outputPath);
-        mMuxerWrapper = new MediaMuxerWrapper(OUTPUT_FORMAT, leadingChunk);
-        mMuxerWrapper2 = new MediaMuxerWrapper(OUTPUT_FORMAT, leadingChunk + 1); // prepared for next chunk
+        //resetMediaMuxer(outputDirectory);
+        mMuxerWrapper = new MediaMuxerWrapper(OUTPUT_DIR, leadingChunk);
+        mMuxerWrapper2 = new MediaMuxerWrapper(OUTPUT_DIR, leadingChunk + 1); // prepared for next chunk
 
 
         mVideoTrackInfo.index = -1;
@@ -669,7 +602,7 @@ public class ChunkedHWRecorder {
         }else{
             // if encoders are separate, finalize this muxer, and switch to others
             Log.i("advanceVideo", "encoders on diff muxers. restarting");
-            mVideoTrackInfo.muxerWrapper.restart(OUTPUT_FORMAT, leadingChunk + 1); // prepare muxer for next chunk, but don't alter leadingChunk
+            mVideoTrackInfo.muxerWrapper.restart(leadingChunk + 1); // prepare muxer for next chunk, but don't alter leadingChunk
             mVideoTrackInfo.muxerWrapper = mAudioTrackInfo.muxerWrapper;
         }
     }
@@ -711,7 +644,7 @@ public class ChunkedHWRecorder {
         }else{
             // if encoders are separate, finalize this muxer, and switch to others
             Log.i("advanceAudio", "encoders on diff muxers. restarting");
-            mAudioTrackInfo.muxerWrapper.restart(OUTPUT_FORMAT, leadingChunk + 1); // prepare muxer for next chunk, but don't alter leadingChunk
+            mAudioTrackInfo.muxerWrapper.restart(leadingChunk + 1); // prepare muxer for next chunk, but don't alter leadingChunk
             mAudioTrackInfo.muxerWrapper = mVideoTrackInfo.muxerWrapper;
         }
     }
@@ -828,7 +761,7 @@ public class ChunkedHWRecorder {
                         if(bufferInfo.presentationTimeUs < 0){
                             bufferInfo.presentationTimeUs = 0;
                         }
-                        muxerWrapper.muxer.writeSampleData(trackInfo.index, encodedData, bufferInfo);
+                        muxerWrapper.writeSampleData(trackInfo.index, encodedData, bufferInfo);
 
                         if (VERBOSE)
                             Log.d(TAG, "sent " + bufferInfo.size + ((encoder == mVideoEncoder) ? " video" : " audio") + " bytes to muxer with pts " + bufferInfo.presentationTimeUs);

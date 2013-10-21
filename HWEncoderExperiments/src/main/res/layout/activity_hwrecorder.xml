@@ -21,6 +21,6 @@
         android:drawableTop="@drawable/ic_launcher"
         android:drawablePadding="20dp"
         android:text="Start Recording"
-        android:onClick="onRunTestButtonClicked"/>
+        android:onClick="onRecordButtonClicked"/>
 
 </RelativeLayout>

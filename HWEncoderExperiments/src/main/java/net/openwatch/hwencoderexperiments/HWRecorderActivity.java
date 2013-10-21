@@ -2,9 +2,10 @@ package net.openwatch.hwencoderexperiments;
 
 import android.app.Activity;
 import android.os.Bundle;
-import android.util.Log;
 import android.view.View;
+import android.widget.Button;
 import net.openwatch.ffmpegwrapper.FFmpegWrapper;
+import net.openwatch.hwencoderexperiments.recorder.ChunkedHWRecorder;
 
 public class HWRecorderActivity extends Activity {
     private static final String TAG = "CameraToMpegTest";
@@ -35,34 +36,7 @@ public class HWRecorderActivity extends Activity {
         //glSurfaceView.onResume();
     }
 
-    public void onRunTestButtonClicked(View v){
-        // test JNI. ffmpegWrapper.test() returns 2
-        Log.i("JNI-TEST", String.valueOf(fFmpegWrapper.test()));
-
-        /*
-            Produces:   java.lang.IllegalStateException: Could not execute method of the activity
-            ...
-            Caused by: java.lang.UnsatisfiedLinkError: Native method not found: net.openwatch.ffmpegwrapper.FFmpegWrapper.test:()I
-            at net.openwatch.ffmpegwrapper.FFmpegWrapper.test(Native Method)
-            at net.openwatch.hwencoderexperiments.HWRecorderActivity.onRunTestButtonClicked(HWRecorderActivity.java:41)
-            at java.lang.reflect.Method.invokeNative(Native Method)
-            at java.lang.reflect.Method.invoke(Method.java:525)
-            at android.view.View$1.onClick(View.java:3628)
-            at android.view.View.performClick(View.java:4240)
-            at android.view.View$PerformClick.run(View.java:17721)
-            at android.os.Handler.handleCallback(Handler.java:730)
-            at android.os.Handler.dispatchMessage(Handler.java:92)
-            at android.os.Looper.loop(Looper.java:137)
-            at android.app.ActivityThread.main(ActivityThread.java:5103)
-            at java.lang.reflect.Method.invokeNative(Native Method)
-            at java.lang.reflect.Method.invoke(Method.java:525)
-            at com.android.internal.os.ZygoteInit$MethodAndArgsCaller.run(ZygoteInit.java:737)
-            at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:553)
-            at dalvik.system.NativeStart.main(Native Method)
-         */
-
-
-        /*
+    public void onRecordButtonClicked(View v){
         if(!recording){
             try {
                 startChunkedHWRecorder();
@@ -76,7 +50,6 @@ public class HWRecorderActivity extends Activity {
             recording = false;
             ((Button) v).setText("Start Recording");
         }
-        */
     }
 
     /**
@@ -85,48 +58,9 @@ public class HWRecorderActivity extends Activity {
     public void startChunkedHWRecorder() throws Throwable {
         chunkedHWRecorder = new ChunkedHWRecorder(getApplicationContext());
         //chunkedHWRecorder.setDisplayEGLContext(context);
-        ChunkedHWRecorderWrapper.runTest(chunkedHWRecorder);
+        chunkedHWRecorder.startRecording(null);
     }
 
-
-    /**
-     * Wraps encodeCameraToMpeg().  This is necessary because SurfaceTexture will try to use
-     * the looper in the current thread if one exists, and the CTS tests create one on the
-     * test thread.
-     * <p/>
-     * The wrapper propagates exceptions thrown by the worker thread back to the caller.
-     */
-    private static class ChunkedHWRecorderWrapper implements Runnable {
-        private Throwable mThrowable;
-        private ChunkedHWRecorder chunkedHwRecorder;
-
-        private ChunkedHWRecorderWrapper(ChunkedHWRecorder recorder) {
-            chunkedHwRecorder = recorder;
-        }
-
-        /**
-         * Entry point.
-         */
-        public static void runTest(ChunkedHWRecorder obj) throws Throwable {
-            ChunkedHWRecorderWrapper wrapper = new ChunkedHWRecorderWrapper(obj);
-            Thread th = new Thread(wrapper, "codec test");
-            th.start();
-            // When th.join() is called, blocks thread which catches onFrameAvailable
-            //th.join();
-            if (wrapper.mThrowable != null) {
-                throw wrapper.mThrowable;
-            }
-        }
-
-        @Override
-        public void run() {
-            try {
-                chunkedHwRecorder.startRecording(null);
-            } catch (Throwable th) {
-                mThrowable = th;
-            }
-        }
-    }
 
     /*
     static EGLContext context;
