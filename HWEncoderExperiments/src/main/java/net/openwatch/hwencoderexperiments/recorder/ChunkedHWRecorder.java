@@ -27,6 +27,7 @@ import android.opengl.*;
 import android.os.Trace;
 import android.util.Log;
 import android.view.Surface;
+import net.openwatch.ffmpegwrapper.FFmpegWrapper;
 import net.openwatch.hwencoderexperiments.FileUtils;
 import net.openwatch.hwencoderexperiments.MediaRecorderWrapper;
 
@@ -109,8 +110,10 @@ public class ChunkedHWRecorder {
     boolean useMediaRecorder = false;
     MediaRecorderWrapper mMediaRecorderWrapper;
 
-    Context c;
+    // FFmpegWrapper
+    FFmpegWrapper ffmpeg = new FFmpegWrapper();
 
+    Context c;
 
     class TrackInfo {
         int index = 0;
@@ -135,6 +138,9 @@ public class ChunkedHWRecorder {
     boolean eosReceived = false;
 
     public void startRecording(final String outputDir){
+        if(outputDir != null)
+            OUTPUT_DIR = outputDir;
+        ffmpeg.prepareAVFormatContext(OUTPUT_DIR + "ffmpeg.mp4");
         new Thread(new Runnable(){
 
             @Override
@@ -145,9 +151,6 @@ public class ChunkedHWRecorder {
     }
 
     private void _startRecording(String outputDir){
-        if(outputDir != null)
-            OUTPUT_DIR = outputDir;
-
         int encBitRate = 1000000;      // bps
         int framesPerChunk = (int) CHUNK_DURATION_SEC * FRAME_RATE;
         Log.d(TAG, VIDEO_MIME_TYPE + " output " + VIDEO_WIDTH + "x" + VIDEO_HEIGHT + " @" + encBitRate);
@@ -328,13 +331,11 @@ public class ChunkedHWRecorder {
             if (inputBufferIndex >= 0) {
                 ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
                 inputBuffer.clear();
-                long presentationTimeNs = System.nanoTime();
                 int inputLength =  audioRecord.read(inputBuffer, SAMPLES_PER_FRAME );
+                long presentationTimeNs = System.nanoTime();
                 presentationTimeNs -= (inputLength / SAMPLE_RATE ) / 1000000000;
                 if(inputLength == AudioRecord.ERROR_INVALID_OPERATION)
                     Log.e(TAG, "Audio read error");
-
-                //long presentationTimeUs = (presentationTimeNs - startWhen) / 1000;
                 long presentationTimeUs = (presentationTimeNs - startWhen) / 1000;
                 if (VERBOSE) Log.i(TAG, "queueing " + inputLength + " audio bytes with pts " + presentationTimeUs);
                 if (endOfStream) {
@@ -754,15 +755,17 @@ public class ChunkedHWRecorder {
                         encodedData.position(bufferInfo.offset);
                         encodedData.limit(bufferInfo.offset + bufferInfo.size);
                         if(encoder == mAudioEncoder){
-                            if(bufferInfo.presentationTimeUs < lastEncodedAudioTimeStamp)
+                            if(bufferInfo.presentationTimeUs < lastEncodedAudioTimeStamp){
                                 bufferInfo.presentationTimeUs = lastEncodedAudioTimeStamp += 23219; // Magical AAC encoded frame time
-                            lastEncodedAudioTimeStamp = bufferInfo.presentationTimeUs;
+                                Log.w(TAG, "received non-increasing audio pts. adjusting.");
+                            }
+                                lastEncodedAudioTimeStamp = bufferInfo.presentationTimeUs;
                         }
                         if(bufferInfo.presentationTimeUs < 0){
                             bufferInfo.presentationTimeUs = 0;
                         }
                         muxerWrapper.writeSampleData(trackInfo.index, encodedData, bufferInfo);
-
+                        ffmpeg.writeAVPacketFromEncodedData(encodedData, (encoder == mVideoEncoder) ? 1 : 0, bufferInfo.offset, bufferInfo.size, bufferInfo.flags, frameCount);
                         if (VERBOSE)
                             Log.d(TAG, "sent " + bufferInfo.size + ((encoder == mVideoEncoder) ? " video" : " audio") + " bytes to muxer with pts " + bufferInfo.presentationTimeUs);
 
@@ -799,6 +802,7 @@ public class ChunkedHWRecorder {
                                 Log.i(TAG, "Stopping and releasing audio encoder");
                                 stopAndReleaseAudioEncoder();
                             }
+                            ffmpeg.finalizeAVFormatContext();
                             //stopAndReleaseEncoders();
                         }
                     }

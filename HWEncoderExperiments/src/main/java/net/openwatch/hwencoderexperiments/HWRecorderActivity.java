@@ -39,7 +39,8 @@ public class HWRecorderActivity extends Activity {
     public void onRecordButtonClicked(View v){
         if(!recording){
             try {
-                startChunkedHWRecorder();
+                chunkedHWRecorder = new ChunkedHWRecorder(getApplicationContext());
+                chunkedHWRecorder.startRecording(null);
                 recording = true;
                 ((Button) v).setText("Stop Recording");
             } catch (Throwable throwable) {
@@ -51,16 +52,6 @@ public class HWRecorderActivity extends Activity {
             ((Button) v).setText("Start Recording");
         }
     }
-
-    /**
-     * test entry point
-     */
-    public void startChunkedHWRecorder() throws Throwable {
-        chunkedHWRecorder = new ChunkedHWRecorder(getApplicationContext());
-        //chunkedHWRecorder.setDisplayEGLContext(context);
-        chunkedHWRecorder.startRecording(null);
-    }
-
 
     /*
     static EGLContext context;
